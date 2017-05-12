@@ -426,14 +426,14 @@ struct bgpdumpbinary_parser : parser<bgpdumpbinary_parser> {
       if (total_path_len == 0){
         return true;
       } else {
-        if(a.length == 0){
+        if (a.length == 0) {
           VAST_WARNING(this, 
             "MRT LENGTH exceeded but Total Path Attribute Length > 0");
           return false;
         }
         // BGP - announce - Message Type   
         a.msg_type = "A";
-      }     
+      }
       uint8_t attr_type;
       uint8_t attr_flags;
       uint16_t attr_length;
@@ -518,12 +518,12 @@ struct bgpdumpbinary_parser : parser<bgpdumpbinary_parser> {
             // BGP - announce - AS Path - Segment Value
             while (path_seg_length > 0) {
               t32 = 0;
-              if(a.subtype == 1){ //BGP4MP_MESSAGE (RFC 6396 4.4.2)
+              if (a.subtype == 1) { //BGP4MP_MESSAGE (RFC 6396 4.4.2)
                 b16be.parse(f, f + 2, t32);
                 a.length -= 2;
                 total_path_len -= 2;
                 attr_length -= 2;
-              }else if (a.subtype == 4){ //BGP4MP_MESSAGE_AS4 (RFC 6396 4.4.3)
+              } else if (a.subtype == 4) { //BGP4MP_MESSAGE_AS4 (RFC 6396 4.4.3)
                 b32be.parse(f, f + 4, t32);
                 a.length -= 4;
                 total_path_len -= 4;
