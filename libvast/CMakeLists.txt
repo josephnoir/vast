@@ -73,6 +73,7 @@ set(libvast_sources
   src/system/tracker.cpp
   src/format/bgpdump.cpp
   src/format/bgpdumpbinary.cpp
+  src/format/mrt.cpp
   src/format/bro.cpp
   src/format/csv.cpp
   src/format/test.cpp
