@@ -1,4 +1,6 @@
+#include "vast/concept/parseable/numeric/byte.hpp"
 #include "vast/error.hpp"
+#include "vast/logger.hpp"
 
 #include "vast/format/mrt.hpp"
 
@@ -78,7 +80,22 @@ reader::reader(std::unique_ptr<std::istream> input) : input_{std::move(input)} {
 }
 
 expected<event> reader::read() {
-  return make_error(ec::unspecified, "Not implemented");
+  if (!event_queue_.empty()) {
+    event current_event = event_queue_.back();
+    event_queue_.pop_back();
+    return std::move(current_event);
+  }
+  if (input_->eof()) {
+    return make_error(ec::end_of_input, "input exhausted");
+  }
+
+
+  if (!event_queue_.empty()) {
+    event current_event = event_queue_.back();
+    event_queue_.pop_back();
+    return std::move(current_event);
+  }
+  return no_error;
 }
 
 expected<void> reader::schema(vast::schema const& sch) {

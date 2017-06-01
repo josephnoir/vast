@@ -13,6 +13,7 @@
 
 #include "vast/format/bgpdump.hpp"
 #include "vast/format/bgpdumpbinary.hpp"
+#include "vast/format/mrt.hpp"
 #include "vast/format/bro.hpp"
 #ifdef VAST_HAVE_PCAP
 #include "vast/format/pcap.hpp"
@@ -73,8 +74,8 @@ expected<actor> spawn_source(local_actor* self, options& opts) {
                                 pseudo_realtime};
     src = self->spawn(source<format::pcap::reader>, std::move(reader));
 #endif
-  } else if (format == "bro" || format == "bgpdump" 
-             || format == "bgpdumpbinary") {
+  } else if (format == "bro" || format == "bgpdump"
+             || format == "bgpdumpbinary" || format == "mrt") {
     auto in = detail::make_input_stream(input, r.opts.count("uds") > 0);
     if (!in)
       return in.error();
@@ -86,8 +87,11 @@ expected<actor> spawn_source(local_actor* self, options& opts) {
       src = self->spawn(source<format::bgpdump::reader>, std::move(reader));
     } else if (format == "bgpdumpbinary") {
       format::bgpdumpbinary::reader reader{std::move(*in)};
-      src = self->spawn(source<format::bgpdumpbinary::reader>, 
+      src = self->spawn(source<format::bgpdumpbinary::reader>,
                         std::move(reader));
+    } else if (format == "mrt") {
+      format::mrt::reader reader{std::move(*in)};
+      src = self->spawn(source<format::mrt::reader>, std::move(reader));
     }
   } else if (format == "test") {
     auto seed = size_t{0};
