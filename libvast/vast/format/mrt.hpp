@@ -4,6 +4,8 @@
 #include <iostream>
 
 #include "vast/concept/parseable/core.hpp"
+#include "vast/concept/parseable/numeric.hpp"
+#include "vast/concept/parseable/vast/data.hpp"
 #include "vast/event.hpp"
 #include "vast/expected.hpp"
 #include "vast/schema.hpp"
@@ -22,6 +24,8 @@ struct mrt_parser : parser<mrt_parser> {
   bool parse(Iterator& f, Iterator& l, event& e) const {
     return true;
   }
+
+
 
   type mrt_bgp4mp_announce_type;
   type mrt_table_dump_type;

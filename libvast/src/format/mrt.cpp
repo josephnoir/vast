@@ -1,4 +1,3 @@
-#include "vast/concept/parseable/numeric/byte.hpp"
 #include "vast/error.hpp"
 #include "vast/logger.hpp"
 
@@ -89,6 +88,34 @@ expected<event> reader::read() {
     return make_error(ec::end_of_input, "input exhausted");
   }
 
+  // TEST
+  uint32_t mrt_header_length = 12;
+  count mrt_timestamp;
+  count mrt_type;
+  count mrt_subtype;
+  count mrt_length;
+  std::vector<char> v(mrt_header_length);
+  input_-> read(&v[0], mrt_header_length);
+  std::vector<char>::iterator v_it_begin = v.begin();
+  std::vector<char>::iterator v_it_end = v.end();
+  static auto mrt_header = parsers::b32be >> parsers::b16be >> parsers::b16be >> parsers::b32be;
+  auto tuple = std::tie(mrt_timestamp, mrt_type, mrt_subtype, mrt_length);
+  if (!mrt_header(v_it_begin, v_it_end, tuple)){
+    VAST_DEBUG(name(), "Error");
+  }
+  // uint16_t t16 = 0;
+  // std::vector<char>::iterator f = v_it_begin + 4;
+  // parsers::b16be.parse(f, f + 2, t16);
+  // mrt_type = count{t16};
+  // t16 = 0;
+  // parsers::b16be.parse(f, f + 2, t16);
+  // mrt_subtype = count{t16};
+  // uint32_t t32 = 0;
+  // parsers::b32be.parse(f, f + 4, t32);
+  // mrt_length = count{t32};
+  VAST_DEBUG(name(), "timestamp type subtype length", mrt_timestamp, mrt_type, mrt_subtype, mrt_length);
+  return make_error(ec::end_of_input, "input exhausted");
+  // TEST END
 
   if (!event_queue_.empty()) {
     event current_event = event_queue_.back();
