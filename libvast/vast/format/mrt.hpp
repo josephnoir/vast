@@ -15,17 +15,12 @@ namespace format {
 namespace mrt {
 
 /// A parser that reading bgp messages from MRT files.
-struct mrt_parser : parser<mrt_parser> {
+struct mrt_parser {
   using attribute = event;
 
   mrt_parser();
 
-  template <class Iterator>
-  bool parse(Iterator& f, Iterator& l, event& e) const {
-    return true;
-  }
-
-
+  bool parse(std::istream& input, std::vector<event> &event_queue);
 
   type mrt_bgp4mp_announce_type;
   type mrt_table_dump_type;

@@ -74,6 +74,43 @@ mrt_parser::mrt_parser() {
   mrt_bgp4mp_keepalive_type.name("mrt::bgp4mp::keepalive");
 }
 
+bool mrt_parser::parse(std::istream& input, std::vector<event>& event_queue){
+  using namespace parsers;
+  // TEST
+  constexpr size_t mrt_header_length = 12;
+  count mrt_timestamp;
+  count mrt_type;
+  count mrt_subtype;
+  count mrt_length;
+  char ca[mrt_header_length];
+  //std::vector<char> v(mrt_header_length);
+  //std::string str("", mrt_header_length);
+  input.read(ca, mrt_header_length);
+  std::string str(ca, mrt_header_length);
+  //input.read(str.data(), mrt_header_length);
+  //std::vector<char>::iterator v_it_begin = v.begin();
+  //std::vector<char>::iterator v_it_end = v.end();
+  static auto mrt_header = b32be >> b16be >> b16be >> b32be;
+  //auto tpl = std::tie(mrt_timestamp, mrt_type, mrt_subtype, mrt_length);
+  //if (!mrt_header(v_it_begin, v_it_end, tpl)){
+  if (!mrt_header(str, mrt_timestamp, mrt_type, mrt_subtype, mrt_length)){
+    return false;
+  }
+  // uint16_t t16 = 0;
+  // std::vector<char>::iterator f = v_it_begin + 4;
+  // parsers::b16be.parse(f, f + 2, t16);
+  // mrt_type = count{t16};
+  // t16 = 0;
+  // parsers::b16be.parse(f, f + 2, t16);
+  // mrt_subtype = count{t16};
+  // uint32_t t32 = 0;
+  // parsers::b32be.parse(f, f + 4, t32);
+  // mrt_length = count{t32};
+  VAST_DEBUG("mrt-parser", "timestamp type subtype length", mrt_timestamp, mrt_type, mrt_subtype, mrt_length);
+  return true;
+  // TEST END
+}
+
 reader::reader(std::unique_ptr<std::istream> input) : input_{std::move(input)} {
   VAST_ASSERT(input_);
 }
@@ -87,36 +124,12 @@ expected<event> reader::read() {
   if (input_->eof()) {
     return make_error(ec::end_of_input, "input exhausted");
   }
-
-  // TEST
-  uint32_t mrt_header_length = 12;
-  count mrt_timestamp;
-  count mrt_type;
-  count mrt_subtype;
-  count mrt_length;
-  std::vector<char> v(mrt_header_length);
-  input_-> read(&v[0], mrt_header_length);
-  std::vector<char>::iterator v_it_begin = v.begin();
-  std::vector<char>::iterator v_it_end = v.end();
-  static auto mrt_header = parsers::b32be >> parsers::b16be >> parsers::b16be >> parsers::b32be;
-  auto tuple = std::tie(mrt_timestamp, mrt_type, mrt_subtype, mrt_length);
-  if (!mrt_header(v_it_begin, v_it_end, tuple)){
-    VAST_DEBUG(name(), "Error");
+  if(!parser_.parse(*input_, event_queue_)){
+    return make_error(ec::parse_error, "parse error");
   }
-  // uint16_t t16 = 0;
-  // std::vector<char>::iterator f = v_it_begin + 4;
-  // parsers::b16be.parse(f, f + 2, t16);
-  // mrt_type = count{t16};
-  // t16 = 0;
-  // parsers::b16be.parse(f, f + 2, t16);
-  // mrt_subtype = count{t16};
-  // uint32_t t32 = 0;
-  // parsers::b32be.parse(f, f + 4, t32);
-  // mrt_length = count{t32};
-  VAST_DEBUG(name(), "timestamp type subtype length", mrt_timestamp, mrt_type, mrt_subtype, mrt_length);
+  // TEST
   return make_error(ec::end_of_input, "input exhausted");
   // TEST END
-
   if (!event_queue_.empty()) {
     event current_event = event_queue_.back();
     event_queue_.pop_back();
