@@ -5,6 +5,7 @@
 
 #include "vast/concept/parseable/core.hpp"
 #include "vast/concept/parseable/numeric.hpp"
+#include "vast/concept/parseable/string.hpp"
 #include "vast/concept/parseable/vast/data.hpp"
 #include "vast/event.hpp"
 #include "vast/expected.hpp"

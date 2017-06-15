@@ -76,30 +76,23 @@ mrt_parser::mrt_parser() {
 
 bool mrt_parser::parse(std::istream& input, std::vector<event>& event_queue){
   using namespace parsers;
-  // TEST
+
   constexpr size_t mrt_header_length = 12;
-  uint32_t mrt_timestamp;
-  uint16_t mrt_type;
-  uint16_t mrt_subtype;
-  uint32_t mrt_length;
+  count mrt_timestamp = 0;
+  count mrt_type = 0;
+  count mrt_subtype = 0;
+  count mrt_length = 0;
+  auto count16 = parsers::b16be->*[](uint16_t x) { return count{x}; };
+  auto count32 = parsers::b32be->*[](uint32_t x) { return count{x}; };
+  //auto time32 = parser::b32be->*[](uint32_t x) { return timestamp{seconds(x)}; };
+
   std::array<char, mrt_header_length> ca;
   input.read(ca.data(), mrt_header_length);
-  static auto mrt_header = b32be >> b16be >> b16be >> b32be;
+  static auto mrt_header = count32 >> count16 >> count16 >> count32;
   if (!mrt_header(ca, mrt_timestamp, mrt_type, mrt_subtype, mrt_length))
     return false;
-  // uint16_t t16 = 0;
-  // std::vector<char>::iterator f = v_it_begin + 4;
-  // parsers::b16be.parse(f, f + 2, t16);
-  // mrt_type = count{t16};
-  // t16 = 0;
-  // parsers::b16be.parse(f, f + 2, t16);
-  // mrt_subtype = count{t16};
-  // uint32_t t32 = 0;
-  // parsers::b32be.parse(f, f + 4, t32);
-  // mrt_length = count{t32};
   VAST_DEBUG("mrt-parser", "timestamp type subtype length", mrt_timestamp, mrt_type, mrt_subtype, mrt_length);
   return true;
-  // TEST END
 }
 
 reader::reader(std::unique_ptr<std::istream> input) : input_{std::move(input)} {
