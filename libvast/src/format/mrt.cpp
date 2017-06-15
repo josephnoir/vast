@@ -78,24 +78,15 @@ bool mrt_parser::parse(std::istream& input, std::vector<event>& event_queue){
   using namespace parsers;
   // TEST
   constexpr size_t mrt_header_length = 12;
-  count mrt_timestamp;
-  count mrt_type;
-  count mrt_subtype;
-  count mrt_length;
-  char ca[mrt_header_length];
-  //std::vector<char> v(mrt_header_length);
-  //std::string str("", mrt_header_length);
-  input.read(ca, mrt_header_length);
-  std::string str(ca, mrt_header_length);
-  //input.read(str.data(), mrt_header_length);
-  //std::vector<char>::iterator v_it_begin = v.begin();
-  //std::vector<char>::iterator v_it_end = v.end();
+  uint32_t mrt_timestamp;
+  uint16_t mrt_type;
+  uint16_t mrt_subtype;
+  uint32_t mrt_length;
+  std::array<char, mrt_header_length> ca;
+  input.read(ca.data(), mrt_header_length);
   static auto mrt_header = b32be >> b16be >> b16be >> b32be;
-  //auto tpl = std::tie(mrt_timestamp, mrt_type, mrt_subtype, mrt_length);
-  //if (!mrt_header(v_it_begin, v_it_end, tpl)){
-  if (!mrt_header(str, mrt_timestamp, mrt_type, mrt_subtype, mrt_length)){
+  if (!mrt_header(ca, mrt_timestamp, mrt_type, mrt_subtype, mrt_length))
     return false;
-  }
   // uint16_t t16 = 0;
   // std::vector<char>::iterator f = v_it_begin + 4;
   // parsers::b16be.parse(f, f + 2, t16);
