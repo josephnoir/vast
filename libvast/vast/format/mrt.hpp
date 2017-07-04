@@ -3,13 +3,19 @@
 
 #include <iostream>
 
+#include "vast/error.hpp"
+#include "vast/logger.hpp"
+#include "vast/event.hpp"
+#include "vast/expected.hpp"
+#include "vast/schema.hpp"
 #include "vast/concept/parseable/core.hpp"
 #include "vast/concept/parseable/numeric.hpp"
 #include "vast/concept/parseable/string.hpp"
 #include "vast/concept/parseable/vast/data.hpp"
-#include "vast/event.hpp"
-#include "vast/expected.hpp"
-#include "vast/schema.hpp"
+//#include "vast/concept/printable/string.hpp"
+//#include "vast/concept/printable/to_string.hpp"
+#include "vast/concept/printable/std/chrono.hpp"
+
 
 namespace vast {
 namespace format {

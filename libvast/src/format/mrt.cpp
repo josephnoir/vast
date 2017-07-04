@@ -1,6 +1,3 @@
-#include "vast/error.hpp"
-#include "vast/logger.hpp"
-
 #include "vast/format/mrt.hpp"
 
 namespace vast {
@@ -76,22 +73,67 @@ mrt_parser::mrt_parser() {
 
 bool mrt_parser::parse(std::istream& input, std::vector<event>& event_queue){
   using namespace parsers;
-
+  using namespace std::chrono;
+  /*
+  RFC 6396 https://tools.ietf.org/html/rfc6396
+  2.  MRT Common Header
+     0                   1                   2                   3
+     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                           Timestamp                           |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |             Type              |            Subtype            |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                             Length                            |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                      Message... (variable)
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  */
   constexpr size_t mrt_header_length = 12;
-  count mrt_timestamp = 0;
+  vast::timestamp mrt_timestamp;
   count mrt_type = 0;
   count mrt_subtype = 0;
   count mrt_length = 0;
-  auto count16 = parsers::b16be->*[](uint16_t x) { return count{x}; };
-  auto count32 = parsers::b32be->*[](uint32_t x) { return count{x}; };
-  //auto time32 = parser::b32be->*[](uint32_t x) { return timestamp{seconds(x)}; };
-
-  std::array<char, mrt_header_length> ca;
-  input.read(ca.data(), mrt_header_length);
-  static auto mrt_header = count32 >> count16 >> count16 >> count32;
-  if (!mrt_header(ca, mrt_timestamp, mrt_type, mrt_subtype, mrt_length))
+  static auto count16 = b16be->*[](uint16_t x) { return count{x}; };
+  static auto count32 = b32be->*[](uint32_t x) { return count{x}; };
+  static auto time32 = b32be->*[](uint32_t x) {
+    return vast::timestamp{seconds(x)};
+  };
+  static auto mrt_header = time32 >> count16 >> count16 >> count32;
+  std::vector<char> mrt_binary(mrt_header_length);
+  input.read(mrt_binary.data(), mrt_header_length);
+  if (!mrt_header(mrt_binary, mrt_timestamp, mrt_type, mrt_subtype, mrt_length))
     return false;
-  VAST_DEBUG("mrt-parser", "timestamp type subtype length", mrt_timestamp, mrt_type, mrt_subtype, mrt_length);
+  VAST_DEBUG("mrt-parser", "timestamp", mrt_timestamp, "type", mrt_type,
+             "subtype", mrt_subtype, "length", mrt_length);
+  mrt_binary.resize(mrt_length);
+  input.read(mrt_binary.data(), mrt_length);
+  /*
+  RFC 6396 https://tools.ietf.org/html/rfc6396
+  4.  MRT Types
+    11   OSPFv2
+    12   TABLE_DUMP
+    13   TABLE_DUMP_V2
+    16   BGP4MP
+    17   BGP4MP_ET
+    32   ISIS
+    33   ISIS_ET
+    48   OSPFv3
+    49   OSPFv3_ET
+  */
+  if (mrt_type == 16) {
+    /*
+    RFC 6396 https://tools.ietf.org/html/rfc6396
+    4.4.  BGP4MP Type
+    Subtypes:
+      0    BGP4MP_STATE_CHANGE
+      1    BGP4MP_MESSAGE
+      4    BGP4MP_MESSAGE_AS4
+      5    BGP4MP_STATE_CHANGE_AS4
+      6    BGP4MP_MESSAGE_LOCAL
+      7    BGP4MP_MESSAGE_AS4_LOCAL
+    */
+  }
   return true;
 }
 
