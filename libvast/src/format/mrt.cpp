@@ -71,7 +71,7 @@ mrt_parser::mrt_parser() {
   mrt_bgp4mp_keepalive_type.name("mrt::bgp4mp::keepalive");
 }
 
-bool mrt_parser::parse(std::istream& input, std::vector<event>& event_queue){
+bool mrt_parser::parse_mrt_header(std::vector<char>& raw, mrt_header& header){
   using namespace parsers;
   using namespace std::chrono;
   /*
@@ -89,25 +89,29 @@ bool mrt_parser::parse(std::istream& input, std::vector<event>& event_queue){
     |                      Message... (variable)
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
   */
-  constexpr size_t mrt_header_length = 12;
-  vast::timestamp mrt_timestamp;
-  count mrt_type = 0;
-  count mrt_subtype = 0;
-  count mrt_length = 0;
   static auto count16 = b16be->*[](uint16_t x) { return count{x}; };
   static auto count32 = b32be->*[](uint32_t x) { return count{x}; };
   static auto time32 = b32be->*[](uint32_t x) {
     return vast::timestamp{seconds(x)};
   };
-  static auto mrt_header = time32 >> count16 >> count16 >> count32;
-  std::vector<char> mrt_binary(mrt_header_length);
-  input.read(mrt_binary.data(), mrt_header_length);
-  if (!mrt_header(mrt_binary, mrt_timestamp, mrt_type, mrt_subtype, mrt_length))
+  static auto mrt_header_parser = time32 >> count16 >> count16 >> count32;
+  if (!mrt_header_parser(raw, header.timestamp, header.type, header.subtype,
+                         header.length))
     return false;
-  VAST_DEBUG("mrt-parser", "timestamp", mrt_timestamp, "type", mrt_type,
-             "subtype", mrt_subtype, "length", mrt_length);
-  mrt_binary.resize(mrt_length);
-  input.read(mrt_binary.data(), mrt_length);
+  return true;
+}
+
+bool mrt_parser::parse(std::istream& input, std::vector<event>& event_queue){
+  mrt_header header;
+  std::vector<char> raw(mrt_header_length);
+  input.read(raw.data(), mrt_header_length);
+  if(!parse_mrt_header(raw, header))
+    return false;
+  VAST_DEBUG("mrt-parser", "timestamp", header.timestamp, "type",
+             header.type, "subtype", header.subtype, "length",
+             header.length);
+  raw.resize(header.length);
+  input.read(raw.data(), header.length);
   /*
   RFC 6396 https://tools.ietf.org/html/rfc6396
   4.  MRT Types
@@ -121,7 +125,7 @@ bool mrt_parser::parse(std::istream& input, std::vector<event>& event_queue){
     48   OSPFv3
     49   OSPFv3_ET
   */
-  if (mrt_type == 16) {
+  if (header.type == 16) {
     /*
     RFC 6396 https://tools.ietf.org/html/rfc6396
     4.4.  BGP4MP Type
@@ -133,6 +137,9 @@ bool mrt_parser::parse(std::istream& input, std::vector<event>& event_queue){
       6    BGP4MP_MESSAGE_LOCAL
       7    BGP4MP_MESSAGE_AS4_LOCAL
     */
+  } else {
+    VAST_WARNING("mrt-parser", "Unsupported MRT type", header.type);
+    return false;
   }
   return true;
 }

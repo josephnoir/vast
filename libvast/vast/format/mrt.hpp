@@ -12,10 +12,7 @@
 #include "vast/concept/parseable/numeric.hpp"
 #include "vast/concept/parseable/string.hpp"
 #include "vast/concept/parseable/vast/data.hpp"
-//#include "vast/concept/printable/string.hpp"
-//#include "vast/concept/printable/to_string.hpp"
 #include "vast/concept/printable/std/chrono.hpp"
-
 
 namespace vast {
 namespace format {
@@ -25,8 +22,18 @@ namespace mrt {
 struct mrt_parser {
   using attribute = event;
 
+  static constexpr size_t mrt_header_length = 12;
+
+  struct mrt_header {
+    vast::timestamp timestamp;
+    count type = 0;
+    count subtype = 0;
+    count length = 0;
+  };
+
   mrt_parser();
 
+  bool parse_mrt_header(std::vector<char>& raw, mrt_header& header);
   bool parse(std::istream& input, std::vector<event> &event_queue);
 
   type mrt_bgp4mp_announce_type;
