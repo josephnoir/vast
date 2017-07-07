@@ -71,7 +71,7 @@ mrt_parser::mrt_parser() {
   mrt_bgp4mp_keepalive_type.name("mrt::bgp4mp::keepalive");
 }
 
-bool mrt_parser::parse_mrt_header(std::vector<char>& raw, mrt_header& header){
+bool mrt_parser::parse_mrt_header(std::vector<char>& raw, mrt_header& header) {
   using namespace parsers;
   using namespace std::chrono;
   /*
@@ -98,20 +98,90 @@ bool mrt_parser::parse_mrt_header(std::vector<char>& raw, mrt_header& header){
   if (!mrt_header_parser(raw, header.timestamp, header.type, header.subtype,
                          header.length))
     return false;
+  VAST_DEBUG("mrt-parser header", "timestamp", header.timestamp, "type",
+             header.type, "subtype", header.subtype, "length",
+             header.length);
   return true;
 }
 
-bool mrt_parser::parse(std::istream& input, std::vector<event>& event_queue){
+bool mrt_parser::parse_mrt_message_bgp4mp_state_change(std::vector<char>& raw) {
+  using namespace parsers;
+  /*
+  RFC 6396 https://tools.ietf.org/html/rfc6396
+  4.4.1.  BGP4MP_STATE_CHANGE Subtype
+     0                   1                   2                   3
+     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |         Peer AS Number        |        Local AS Number        |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |        Interface Index        |        Address Family         |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                      Peer IP Address (variable)               |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                      Local IP Address (variable)              |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |            Old State          |          New State            |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  */
+  count peer_as_nr = 0;
+  count local_as_nr = 0;
+  count interface_index = 0;
+  count addr_family = 0;
+  static auto count16 = b16be->*[](uint16_t x) { return count{x}; };
+  static auto bgp4mp_state_change_parser = count16 >> count16 >> count16 >>
+                                           count16;
+  if(!bgp4mp_state_change_parser(raw, peer_as_nr, local_as_nr, interface_index,
+                                 addr_family))
+    return false;
+  VAST_DEBUG("mrt-parser bgp4mp-state-change", "peer_as_nr", peer_as_nr,
+             "local_as_nr", local_as_nr, "interface_index", interface_index,
+             "addr_family", addr_family);
+  return true;
+}
+
+bool mrt_parser::parse_mrt_message_bgp4mp(std::vector<char>& raw,
+                                          mrt_header& header) {
+  /*
+  RFC 6396 https://tools.ietf.org/html/rfc6396
+  4.4.  BGP4MP Type
+  Subtypes:
+    0    BGP4MP_STATE_CHANGE
+    1    BGP4MP_MESSAGE
+    4    BGP4MP_MESSAGE_AS4
+    5    BGP4MP_STATE_CHANGE_AS4
+    6    BGP4MP_MESSAGE_LOCAL
+    7    BGP4MP_MESSAGE_AS4_LOCAL
+  */
+  if (header.subtype == 0) {
+    if(!parse_mrt_message_bgp4mp_state_change(raw))
+      return false;
+  } else {
+    VAST_WARNING("mrt-parser", "Unsupported MRT BGP4MP subtype",
+                 header.subtype);
+    return false;
+  }
+  return true;
+}
+
+bool mrt_parser::parse(std::istream& input, std::vector<event>& event_queue) {
+  sleep(1); //TEST
   mrt_header header;
   std::vector<char> raw(mrt_header_length);
   input.read(raw.data(), mrt_header_length);
-  if(!parse_mrt_header(raw, header))
+  if (!input) {
+    VAST_ERROR("mrt-parser", "Only", input.gcount(), "of", mrt_header_length,
+                 "bytes could be read from stream");
     return false;
-  VAST_DEBUG("mrt-parser", "timestamp", header.timestamp, "type",
-             header.type, "subtype", header.subtype, "length",
-             header.length);
+  }
+  if (!parse_mrt_header(raw, header))
+    return false;
   raw.resize(header.length);
   input.read(raw.data(), header.length);
+  if (!input) {
+    VAST_ERROR("mrt-parser", "Only", input.gcount(), "of", header.length,
+                 "bytes could be read from stream");
+    return false;
+  }
   /*
   RFC 6396 https://tools.ietf.org/html/rfc6396
   4.  MRT Types
@@ -126,17 +196,8 @@ bool mrt_parser::parse(std::istream& input, std::vector<event>& event_queue){
     49   OSPFv3_ET
   */
   if (header.type == 16) {
-    /*
-    RFC 6396 https://tools.ietf.org/html/rfc6396
-    4.4.  BGP4MP Type
-    Subtypes:
-      0    BGP4MP_STATE_CHANGE
-      1    BGP4MP_MESSAGE
-      4    BGP4MP_MESSAGE_AS4
-      5    BGP4MP_STATE_CHANGE_AS4
-      6    BGP4MP_MESSAGE_LOCAL
-      7    BGP4MP_MESSAGE_AS4_LOCAL
-    */
+    if (!parse_mrt_message_bgp4mp(raw, header))
+      return false;
   } else {
     VAST_WARNING("mrt-parser", "Unsupported MRT type", header.type);
     return false;
@@ -157,12 +218,9 @@ expected<event> reader::read() {
   if (input_->eof()) {
     return make_error(ec::end_of_input, "input exhausted");
   }
-  if(!parser_.parse(*input_, event_queue_)){
+  if (!parser_.parse(*input_, event_queue_)) {
     return make_error(ec::parse_error, "parse error");
   }
-  // TEST
-  return make_error(ec::end_of_input, "input exhausted");
-  // TEST END
   if (!event_queue_.empty()) {
     event current_event = event_queue_.back();
     event_queue_.pop_back();

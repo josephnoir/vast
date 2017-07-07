@@ -34,6 +34,8 @@ struct mrt_parser {
   mrt_parser();
 
   bool parse_mrt_header(std::vector<char>& raw, mrt_header& header);
+  bool parse_mrt_message_bgp4mp_state_change(std::vector<char>& raw);
+  bool parse_mrt_message_bgp4mp(std::vector<char>& raw, mrt_header& header);
   bool parse(std::istream& input, std::vector<event> &event_queue);
 
   type mrt_bgp4mp_announce_type;
