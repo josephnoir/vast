@@ -164,7 +164,6 @@ bool mrt_parser::parse_mrt_message_bgp4mp(std::vector<char>& raw,
 }
 
 bool mrt_parser::parse(std::istream& input, std::vector<event>& event_queue) {
-  sleep(1); //TEST
   mrt_header header;
   std::vector<char> raw(mrt_header_length);
   input.read(raw.data(), mrt_header_length);
