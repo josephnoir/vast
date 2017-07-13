@@ -238,9 +238,9 @@ struct bgpdumpbinary_parser : parser<bgpdumpbinary_parser> {
     uint8_t t8 = 0;
     uint16_t t16 = 0;
 
-    if(a.length != 0 && f + a.length <= l){    
+    if (a.length != 0 && f + a.length <= l) {
       // only BGP Message packets allowed
-      if (a.subtype != 1 && a.subtype != 4){
+      if (a.subtype != 1 && a.subtype != 4) {
         VAST_DEBUG("MRT SUBTYPE not BGPMESSAGE -> ", a.subtype);
         f += a.length;
         a.length = 0;
@@ -267,14 +267,14 @@ struct bgpdumpbinary_parser : parser<bgpdumpbinary_parser> {
 
   /*--------------------BGP4MP_MESSAGE_OPEN---------------------*/
   template <class Iterator, class Attribute>
-  bool parse_bgp4mp_msg_open(Iterator &f, Iterator const &l, 
+  bool parse_bgp4mp_msg_open(Iterator &f, Iterator const &l,
                              Attribute &a) const {
     using namespace parsers;
     uint8_t t8 = 0;
     uint16_t t16 = 0;
     uint32_t t32 = 0;
     
-    if(a.length != 0 && f + a.length <= l){  
+    if (a.length != 0 && f + a.length <= l) {
       a.msg_type = "O";
       // BGP - OPEN - Version
       byte.parse(f, f + 1, t8);
@@ -642,7 +642,7 @@ struct bgpdumpbinary_parser : parser<bgpdumpbinary_parser> {
           t16 = 0;
           b16be.parse(f, f + 2, t16);
           a.length -= 2;
-          // BGP - announce - MP_REACH_NLRI - 
+          // BGP - announce - MP_REACH_NLRI -
           // Subsequent Address Family Identifier
           t8 = 0;
           byte.parse(f, f + 1, t8);
@@ -663,10 +663,9 @@ struct bgpdumpbinary_parser : parser<bgpdumpbinary_parser> {
           a.length -= mp_next_hop_len;
           // BGP - announce - MP_REACH_NLRI - Reserved
           f++;
-          a.length--;        
+          a.length--;
           total_path_len--;
           attr_length--;
-            
           // BGP - announce - MP_REACH_NLRI - Prefix IPv6
           a.length -= attr_length;
           total_path_len -= attr_length;
@@ -708,7 +707,6 @@ struct bgpdumpbinary_parser : parser<bgpdumpbinary_parser> {
           a.length--;
           attr_length -= 3;
           total_path_len -= 3;
-          
           // BGP - announce - MP_UNREACH_NLRI - Prefix
           a.length -= attr_length;
           total_path_len -= attr_length;
@@ -745,7 +743,7 @@ struct bgpdumpbinary_parser : parser<bgpdumpbinary_parser> {
           f += attr_length;
           total_path_len -= attr_length;
         } else {
-          VAST_DEBUG(this, "Attribute Type not supported -> ", 
+          VAST_DEBUG(this, "Attribute Type not supported -> ",
                      static_cast<uint16_t>(attr_type));
           if(attr_length > 0){
             a.length -= attr_length;
@@ -789,7 +787,7 @@ struct bgpdumpbinary_parser : parser<bgpdumpbinary_parser> {
             t32 <<= 8;
 
           a.prefix_v4.push_back(
-            subnet{address{&t32, address::ipv4, address::host}, 
+            subnet{address{&t32, address::ipv4, address::host},
             prefix_bits});
         }
       }
@@ -1323,9 +1321,9 @@ struct bgpdumpbinary_parser : parser<bgpdumpbinary_parser> {
       //  return false;
       //}
     }
-    
+
     /*TABLE_DUMP_V2*/
-    else if(def.type == 13) {
+    else if (def.type == 13) {
       if(!parse_table_dump_v2(f, l, def)){
         VAST_WARNING(this, "Failed to parse TABLE_DUMP_V2");
         return false;
@@ -1333,32 +1331,32 @@ struct bgpdumpbinary_parser : parser<bgpdumpbinary_parser> {
     }
     
     /*BGP4MP*/
-    else if(def.type == 16 || def.type == 17) {
-        
+    else if (def.type == 16 || def.type == 17) {
+
       /*BGP4MP_MESSAGE_AS4*/
-      if (!parse_bgp4mp_msg_as4(f, l, def)){
+      if (!parse_bgp4mp_msg_as4(f, l, def)) {
         VAST_WARNING(this, "Failed to parse MRT MESSAGE");
         return false;
       }
-      /*BGP4MP_STATE_CHANGE*/   
-      if (parse_bgp4mp_state_change(f, l, def)){
+      /*BGP4MP_STATE_CHANGE*/
+      if (parse_bgp4mp_state_change(f, l, def)) {
         return true;
       }
       /*BGP*/
-      if (!parse_bgp(f, l, def)){
+      if (!parse_bgp(f, l, def)) {
         VAST_WARNING(this, "Failed to parse BGP MESSAGE");
         return false;
       }
 
-      /*BGP4MP_MESSAGE_OPEN*/  
-      if(def.bgp_type == 1){
-        if(!parse_bgp4mp_msg_open(f,l,def)){
+      /*BGP4MP_MESSAGE_OPEN*/
+      if (def.bgp_type == 1) {
+        if(!parse_bgp4mp_msg_open(f,l,def)) {
           VAST_WARNING(this, "Failed to parse BGP MESSAGE OPEN");
           return false;
         }
-      } 
+      }
       /*BGP4MP_MESSAGE_UPDATE*/
-      else if(def.bgp_type == 2) {
+      else if (def.bgp_type == 2) {
         with = def;
         /*BGP4MP_MESSAGE_UPDATE_WITHDRAW*/
         if (!parse_bgp4mp_msg_update_withdraw(f, l, with)) {
@@ -1371,17 +1369,17 @@ struct bgpdumpbinary_parser : parser<bgpdumpbinary_parser> {
           VAST_WARNING(this, "Failed to parse BGP MESSAGE UPDATE ANNOUNCE");
           return false;
         }
-      }  
+      }
       /*BGP4MP_MESSAGE_NOTIFICATION*/
-      else if(def.bgp_type == 3) {
-        if(!parse_bgp4mp_msg_notification(f,l,def)){
+      else if (def.bgp_type == 3) {
+        if (!parse_bgp4mp_msg_notification(f,l,def)) {
           VAST_WARNING(this, "Failed to parse BGP MESSAGE NOTIFICATION");
           return false;
         }
       }
       /*BGP4MP_MESSAGE_KEEPALIVE*/
-      else if(def.bgp_type == 4) {
-        if(!parse_bgp4mp_msg_keepalive(f,l,def)){
+      else if (def.bgp_type == 4) {
+        if (!parse_bgp4mp_msg_keepalive(f,l,def)) {
           VAST_WARNING(this, "Failed to parse BGP MESSAGE KEEPALIVE");
           return false;
         }

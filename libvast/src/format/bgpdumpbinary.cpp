@@ -54,7 +54,7 @@ bgpdumpbinary_parser::bgpdumpbinary_parser() {
     {"bgp_identifier", count_type{}},
   };
   open_type = record_type{std::move(open_fields)};
-  open_type.name("bgpdump::open");  
+  open_type.name("bgpdump::open");
   // Notification type.
   auto notification_fields = std::vector<record_field>{
     {"timestamp", timestamp_type{}},
@@ -510,7 +510,7 @@ expected<event> reader::read() {
     }
   }
   /*----------------- TABLE_DUMP_V2 Packet End -------------*/
-  
+
   if (!event_queue_.empty()) {
     event current_event = event_queue_.back();
     event_queue_.pop_back();
@@ -555,7 +555,7 @@ char const* reader::name() const {
   return "bgpdumpbinary-reader";
 }
 
-bool reader::import(){
+bool reader::import() {
   if(!in_){
     return false;
   }

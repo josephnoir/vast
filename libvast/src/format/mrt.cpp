@@ -74,6 +74,11 @@ mrt_parser::mrt_parser() {
 bool mrt_parser::parse_mrt_header(std::vector<char>& raw, mrt_header& header) {
   using namespace parsers;
   using namespace std::chrono;
+  static auto count16 = b16be->*[](uint16_t x) { return count{x}; };
+  static auto count32 = b32be->*[](uint32_t x) { return count{x}; };
+  static auto time32 = b32be->*[](uint32_t x) {
+    return vast::timestamp{seconds(x)};
+  };
   /*
   RFC 6396 https://tools.ietf.org/html/rfc6396
   2.  MRT Common Header
@@ -89,11 +94,6 @@ bool mrt_parser::parse_mrt_header(std::vector<char>& raw, mrt_header& header) {
     |                      Message... (variable)
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
   */
-  static auto count16 = b16be->*[](uint16_t x) { return count{x}; };
-  static auto count32 = b32be->*[](uint32_t x) { return count{x}; };
-  static auto time32 = b32be->*[](uint32_t x) {
-    return vast::timestamp{seconds(x)};
-  };
   static auto mrt_header_parser = time32 >> count16 >> count16 >> count32;
   if (!mrt_header_parser(raw, header.timestamp, header.type, header.subtype,
                          header.length))
@@ -104,8 +104,11 @@ bool mrt_parser::parse_mrt_header(std::vector<char>& raw, mrt_header& header) {
   return true;
 }
 
-bool mrt_parser::parse_mrt_message_bgp4mp_state_change(std::vector<char>& raw) {
+bool mrt_parser::parse_mrt_message_bgp4mp_state_change(bool as4,
+                                                       std::vector<char>& raw) {
   using namespace parsers;
+  static auto count16 = b16be->*[](uint16_t x) { return count{x}; };
+  static auto count32 = b32be->*[](uint32_t x) { return count{x}; };
   /*
   RFC 6396 https://tools.ietf.org/html/rfc6396
   4.4.1.  BGP4MP_STATE_CHANGE Subtype
@@ -127,15 +130,57 @@ bool mrt_parser::parse_mrt_message_bgp4mp_state_change(std::vector<char>& raw) {
   count local_as_nr = 0;
   count interface_index = 0;
   count addr_family = 0;
-  static auto count16 = b16be->*[](uint16_t x) { return count{x}; };
-  static auto bgp4mp_state_change_parser = count16 >> count16 >> count16 >>
-                                           count16;
-  if(!bgp4mp_state_change_parser(raw, peer_as_nr, local_as_nr, interface_index,
-                                 addr_family))
-    return false;
+  address peer_ip_addr;
+  address local_ip_addr;
+  count old_state;
+  count new_state;
+  /*
+  RFC 6396 https://tools.ietf.org/html/rfc6396
+  4.4.4.  BGP4MP_STATE_CHANGE_AS4 Subtype
+    This subtype updates the BGP4MP_STATE_CHANGE Subtype to support
+    4-byte AS numbers.
+  */
+  if (as4) {
+    static auto bgp4mp_state_change_parser = count32 >> count32 >> count16 >>
+                                             count16;
+    if(!bgp4mp_state_change_parser(raw, peer_as_nr, local_as_nr,
+                                   interface_index, addr_family))
+      return false;
+    raw = std::vector<char>((raw.begin()+12),raw.end());
+  } else {
+    static auto bgp4mp_state_change_parser = count16 >> count16 >> count16 >>
+                                             count16;
+    if(!bgp4mp_state_change_parser(raw, peer_as_nr, local_as_nr,
+                                   interface_index, addr_family))
+      return false;
+    raw = std::vector<char>((raw.begin()+8),raw.end());
+  }
   VAST_DEBUG("mrt-parser bgp4mp-state-change", "peer_as_nr", peer_as_nr,
              "local_as_nr", local_as_nr, "interface_index", interface_index,
              "addr_family", addr_family);
+  /*
+  RFC 6396 https://tools.ietf.org/html/rfc6396
+  4.4.1.  BGP4MP_STATE_CHANGE Subtype
+  Address Family Types:
+    1    AFI_IPv4
+    2    AFI_IPv6
+  */
+  if (addr_family == 1) {
+    static auto ip32 = b32be->*[](uint32_t x) {
+      return address{&x, address::ipv4, address::host};
+    };
+    static auto bgp4mp_state_change_parser = ip32 >> ip32 >> count16 >> count16;
+    if (!bgp4mp_state_change_parser(raw, peer_ip_addr, local_ip_addr,
+                                    old_state, new_state))
+      return false;
+  } else if (addr_family == 2) {
+
+  } else {
+    return false;
+  }
+  VAST_DEBUG("mrt-parser bgp4mp-state-change", "peer_ip_addr", peer_ip_addr,
+             "local_ip_addr", local_ip_addr, "old_state", old_state,
+             "new_state", new_state);
   return true;
 }
 
@@ -153,7 +198,10 @@ bool mrt_parser::parse_mrt_message_bgp4mp(std::vector<char>& raw,
     7    BGP4MP_MESSAGE_AS4_LOCAL
   */
   if (header.subtype == 0) {
-    if(!parse_mrt_message_bgp4mp_state_change(raw))
+    if (!parse_mrt_message_bgp4mp_state_change(false, raw))
+      return false;
+  } else if (header.subtype == 5) {
+    if (!parse_mrt_message_bgp4mp_state_change(true, raw))
       return false;
   } else {
     VAST_WARNING("mrt-parser", "Unsupported MRT BGP4MP subtype",

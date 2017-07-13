@@ -8,11 +8,13 @@
 #include "vast/event.hpp"
 #include "vast/expected.hpp"
 #include "vast/schema.hpp"
+#include "vast/address.hpp"
 #include "vast/concept/parseable/core.hpp"
 #include "vast/concept/parseable/numeric.hpp"
 #include "vast/concept/parseable/string.hpp"
 #include "vast/concept/parseable/vast/data.hpp"
 #include "vast/concept/printable/std/chrono.hpp"
+#include "vast/concept/printable/vast/address.hpp"
 
 namespace vast {
 namespace format {
@@ -34,7 +36,7 @@ struct mrt_parser {
   mrt_parser();
 
   bool parse_mrt_header(std::vector<char>& raw, mrt_header& header);
-  bool parse_mrt_message_bgp4mp_state_change(std::vector<char>& raw);
+  bool parse_mrt_message_bgp4mp_state_change(bool as4, std::vector<char>& raw);
   bool parse_mrt_message_bgp4mp(std::vector<char>& raw, mrt_header& header);
   bool parse(std::istream& input, std::vector<event> &event_queue);
 
