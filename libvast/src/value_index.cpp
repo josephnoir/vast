@@ -360,19 +360,51 @@ bool subnet_index::push_back_impl(data const& x, size_type skip) {
 
 expected<bitmap>
 subnet_index::lookup_impl(relational_operator op, data const& x) const {
-  if (!(op == equal || op == not_equal))
-    return make_error(ec::unsupported_operator, op);
-  auto sn = get_if<subnet>(x);
-  if (!sn)
-    return make_error(ec::type_clash, x);
-  auto result = network_.lookup(equal, sn->network());
-  if (!result)
-    return result;
-  auto n = length_.lookup(equal, sn->length());
-  *result &= n;
-  if (op == not_equal)
-    result->flip();
-  return result;
+  switch (op) {
+    default:
+      return make_error(ec::unsupported_operator, op);
+    case equal:
+    case not_equal: {
+      auto sn = get_if<subnet>(x);
+      if (!sn)
+        return make_error(ec::type_clash, x);
+      auto result = network_.lookup(equal, sn->network());
+      if (!result)
+        return result;
+      auto n = length_.lookup(equal, sn->length());
+      *result &= n;
+      if (op == not_equal)
+        result->flip();
+      return result;
+    }
+    case in:
+    case not_in: {
+      // Let S and T be two subnets with respective prefix lengths n_S and n_T
+      // and network addresses a_S and a_T. For S ⊆ T to hold, two conditions
+      // must be true:
+      //   (1) there cannot be more hosts in S than in T, i.e., n_T <= n_S
+      //   (2) the top n_T bits of a_S and a_T must be equal.
+      // For example, 10.1.1.0/16 ⊆ 10.0.0.0/8 since 8 <= 16 and the top 8 bits
+      // of 10.1.1.00 and 10.0.0.0 are equal.
+      auto sn = get_if<subnet>(x);
+      if (!sn)
+        return make_error(ec::type_clash, x);
+      bitmap result = length_.lookup(less_equal, sn->length());
+      for (auto i = uint8_t{1}; i <= sn->length(); ++i) {
+        auto addr = sn->network();
+        addr.mask(i);
+        auto bm = network_.lookup(equal, addr);
+        if (!bm)
+          return bm;
+        result &= *bm;
+        if (result.empty() || all<0>(result))
+          break;
+      }
+      if (op == not_in)
+        result.flip();
+      return result;
+    }
+  }
 }
 
 
