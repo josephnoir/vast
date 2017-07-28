@@ -191,19 +191,92 @@ bool mrt_parser::parse_mrt_message_bgp4mp_state_change(bool as4,
   return true;
 }
 
-bool mrt_parser::parse_mrt_message_bgp4mp_message_open() {
+bool mrt_parser::parse_bgp4mp_message_open(bool as4, std::vector<char>& raw) {
+  using namespace parsers;
+  auto count8 = byte->*[](uint8_t x) { return count{x}; };
+  auto count16 = b16be->*[](uint16_t x) { return count{x}; };
+  auto count32 = b32be->*[](uint32_t x) { return count{x}; };
+  /*
+  RFC 4271 https://tools.ietf.org/html/rfc4271
+  4.2.  OPEN Message Format
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+    +-+-+-+-+-+-+-+-+
+    |    Version    |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |     My Autonomous System      |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |           Hold Time           |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                         BGP Identifier                        |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    | Opt Parm Len  |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                                                               |
+    |             Optional Parameters (variable)                    |
+    |                                                               |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  */
+  count version;
+  count my_autonomous_system;
+  count hold_time;
+  count bgp_identifier;
+  count opt_parm_len;
+  if (as4) {
+    auto bgp4mp_messasge_open_parser = count8 >> count32 >> count16 >>
+                                       count32 >> count8;
+    if (!bgp4mp_messasge_open_parser(raw, version, my_autonomous_system,
+                                     hold_time, bgp_identifier, opt_parm_len))
+      return false;
+    raw = std::vector<char>((raw.begin() + 12), raw.end());
+  } else {
+    auto bgp4mp_messasge_open_parser = count8 >> count16 >> count16 >>
+                                       count32 >> count8;
+    if (!bgp4mp_messasge_open_parser(raw, version, my_autonomous_system,
+                                     hold_time, bgp_identifier, opt_parm_len))
+      return false;
+    raw = std::vector<char>((raw.begin() + 10), raw.end());
+  }
+  VAST_DEBUG("mrt-parser bgp4mp-message-open", "version", version,
+             "my_autonomous_system", my_autonomous_system, "hold_time",
+             hold_time, "opt_parm_len", opt_parm_len);
   return true;
 }
 
-bool mrt_parser::parse_mrt_message_bgp4mp_message_update() {
+bool mrt_parser::parse_bgp4mp_message_update(bool as4, std::vector<char>& raw) {
+  /*
+  RFC 4271 https://tools.ietf.org/html/rfc4271
+  4.3.  UPDATE Message Format
+    +-----------------------------------------------------+
+    |   Withdrawn Routes Length (2 octets)                |
+    +-----------------------------------------------------+
+    |   Withdrawn Routes (variable)                       |
+    +-----------------------------------------------------+
+    |   Total Path Attribute Length (2 octets)            |
+    +-----------------------------------------------------+
+    |   Path Attributes (variable)                        |
+    +-----------------------------------------------------+
+    |   Network Layer Reachability Information (variable) |
+    +-----------------------------------------------------+
+  */
+  /*
+  RFC 4271 https://tools.ietf.org/html/rfc4271
+  4.3.  UPDATE Message Format
+  Withdrawn Routes
+    +---------------------------+
+    |   Length (1 octet)        |
+    +---------------------------+
+    |   Prefix (variable)       |
+    +---------------------------+
+  */
   return true;
 }
 
-bool mrt_parser::parse_mrt_message_bgp4mp_message_notification() {
+bool mrt_parser::parse_bgp4mp_message_notification() {
   return true;
 }
 
-bool mrt_parser::parse_mrt_message_bgp4mp_message_keepalive() {
+bool mrt_parser::parse_bgp4mp_message_keepalive() {
   return true;
 }
 
@@ -321,13 +394,13 @@ bool mrt_parser::parse_mrt_message_bgp4mp_message(bool as4,
     4 - KEEPALIVE
   */
   if (type == 1) {
-    return parse_mrt_message_bgp4mp_message_open();
+    return parse_bgp4mp_message_open(as4, raw);
   } else if (type == 2) {
-    return parse_mrt_message_bgp4mp_message_update();
+    return parse_bgp4mp_message_update(as4, raw);
   } else if (type == 3) {
-    return parse_mrt_message_bgp4mp_message_notification();
+    return parse_bgp4mp_message_notification();
   } else if (type == 4) {
-    return parse_mrt_message_bgp4mp_message_keepalive();
+    return parse_bgp4mp_message_keepalive();
   } else {
     VAST_WARNING("mrt-parser", "Unsupported MRT BGP4MP message type", type);
     return false;

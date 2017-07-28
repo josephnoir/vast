@@ -39,10 +39,10 @@ struct mrt_parser {
   bool parse_mrt_message_table_dump_v2(std::vector<char>& raw,
                                        mrt_header& header);
   bool parse_mrt_message_bgp4mp_state_change(bool as4, std::vector<char>& raw);
-  bool parse_mrt_message_bgp4mp_message_open();
-  bool parse_mrt_message_bgp4mp_message_update();
-  bool parse_mrt_message_bgp4mp_message_notification();
-  bool parse_mrt_message_bgp4mp_message_keepalive();
+  bool parse_bgp4mp_message_open(bool as4, std::vector<char>& raw);
+  bool parse_bgp4mp_message_update(bool as4, std::vector<char>& raw);
+  bool parse_bgp4mp_message_notification();
+  bool parse_bgp4mp_message_keepalive();
   bool parse_mrt_message_bgp4mp_message(bool as4, std::vector<char>& raw);
   bool parse_mrt_message_bgp4mp(std::vector<char>& raw, mrt_header& header);
   bool parse_mrt_message_bgp4mp_et(std::vector<char>& raw, mrt_header& header);
