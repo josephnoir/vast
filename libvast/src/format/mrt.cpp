@@ -93,8 +93,8 @@ bool mrt_parser::parse_mrt_header(std::vector<char>& raw, mrt_header& header) {
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
   */
   auto mrt_header_parser = stime32 >> count16 >> count16 >> count32;
-  if (!mrt_header_parser(raw, header.timestamp, header.type, header.subtype,
-                         header.length))
+  if (! mrt_header_parser(raw, header.timestamp, header.type, header.subtype,
+                          header.length))
     return false;
   VAST_DEBUG("mrt-parser header", "timestamp", header.timestamp, "type",
              header.type, "subtype", header.subtype, "length",
@@ -107,8 +107,9 @@ bool mrt_parser::parse_mrt_message_table_dump_v2(std::vector<char>& raw,
   return true;
 }
 
-bool mrt_parser::parse_mrt_message_bgp4mp_state_change(bool as4,
-                                                       std::vector<char>& raw) {
+bool mrt_parser::parse_mrt_message_bgp4mp_state_change(
+  std::vector<char>& raw, bool as4, mrt_header& header,
+  std::vector<event> &event_queue) {
   using namespace parsers;
   auto count16 = b16be->*[](uint16_t x) { return count{x}; };
   auto count32 = b32be->*[](uint32_t x) { return count{x}; };
@@ -151,14 +152,14 @@ bool mrt_parser::parse_mrt_message_bgp4mp_state_change(bool as4,
   */
   if (as4) {
     auto bgp4mp_state_change_parser = count32 >> count32 >> count16 >> count16;
-    if(!bgp4mp_state_change_parser(raw, peer_as_nr, local_as_nr,
-                                   interface_index, addr_family))
+    if(! bgp4mp_state_change_parser(raw, peer_as_nr, local_as_nr,
+                                    interface_index, addr_family))
       return false;
     raw = std::vector<char>((raw.begin() + 12), raw.end());
   } else {
     auto bgp4mp_state_change_parser = count16 >> count16 >> count16 >> count16;
-    if(!bgp4mp_state_change_parser(raw, peer_as_nr, local_as_nr,
-                                   interface_index, addr_family))
+    if(! bgp4mp_state_change_parser(raw, peer_as_nr, local_as_nr,
+                                    interface_index, addr_family))
       return false;
     raw = std::vector<char>((raw.begin() + 8), raw.end());
   }
@@ -174,13 +175,13 @@ bool mrt_parser::parse_mrt_message_bgp4mp_state_change(bool as4,
   */
   if (addr_family == 1) {
     auto bgp4mp_state_change_parser = ipv4 >> ipv4 >> count16 >> count16;
-    if (!bgp4mp_state_change_parser(raw, peer_ip_addr, local_ip_addr,
-                                    old_state, new_state))
+    if (! bgp4mp_state_change_parser(raw, peer_ip_addr, local_ip_addr,
+                                     old_state, new_state))
       return false;
   } else if (addr_family == 2) {
     auto bgp4mp_state_change_parser = ipv6 >> ipv6 >> count16 >> count16;
-    if (!bgp4mp_state_change_parser(raw, peer_ip_addr, local_ip_addr,
-                                    old_state, new_state))
+    if (! bgp4mp_state_change_parser(raw, peer_ip_addr, local_ip_addr,
+                                     old_state, new_state))
       return false;
   } else {
     return false;
@@ -188,10 +189,22 @@ bool mrt_parser::parse_mrt_message_bgp4mp_state_change(bool as4,
   VAST_DEBUG("mrt-parser bgp4mp-state-change", "peer_ip_addr", peer_ip_addr,
              "local_ip_addr", local_ip_addr, "old_state", old_state,
              "new_state", new_state);
+  vector record;
+  record.emplace_back(std::move(header.timestamp));
+  record.emplace_back(std::move(peer_ip_addr));
+  record.emplace_back(std::move(peer_as_nr));
+  record.emplace_back(std::move(old_state));
+  record.emplace_back(std::move(new_state));
+  event e{{std::move(record), mrt_bgp4mp_state_change_type}};
+  e.timestamp(header.timestamp);
+  event_queue.push_back(e);
   return true;
 }
 
-bool mrt_parser::parse_bgp4mp_message_open(bool as4, std::vector<char>& raw) {
+bool mrt_parser::parse_bgp4mp_message_open(std::vector<char>& raw,
+                                           mrt_header& header,
+                                           bgp4mp_info& info,
+                                           std::vector<event> &event_queue) {
   using namespace parsers;
   auto count8 = byte->*[](uint8_t x) { return count{x}; };
   auto count16 = b16be->*[](uint16_t x) { return count{x}; };
@@ -222,28 +235,43 @@ bool mrt_parser::parse_bgp4mp_message_open(bool as4, std::vector<char>& raw) {
   count hold_time;
   count bgp_identifier;
   count opt_parm_len;
-  if (as4) {
+  if (info.as4) {
     auto bgp4mp_messasge_open_parser = count8 >> count32 >> count16 >>
                                        count32 >> count8;
-    if (!bgp4mp_messasge_open_parser(raw, version, my_autonomous_system,
-                                     hold_time, bgp_identifier, opt_parm_len))
+    if (! bgp4mp_messasge_open_parser(raw, version, my_autonomous_system,
+                                      hold_time, bgp_identifier, opt_parm_len))
       return false;
     raw = std::vector<char>((raw.begin() + 12), raw.end());
   } else {
     auto bgp4mp_messasge_open_parser = count8 >> count16 >> count16 >>
                                        count32 >> count8;
-    if (!bgp4mp_messasge_open_parser(raw, version, my_autonomous_system,
-                                     hold_time, bgp_identifier, opt_parm_len))
+    if (! bgp4mp_messasge_open_parser(raw, version, my_autonomous_system,
+                                      hold_time, bgp_identifier, opt_parm_len))
       return false;
     raw = std::vector<char>((raw.begin() + 10), raw.end());
   }
   VAST_DEBUG("mrt-parser bgp4mp-message-open", "version", version,
              "my_autonomous_system", my_autonomous_system, "hold_time",
-             hold_time, "opt_parm_len", opt_parm_len);
+             hold_time, "bgp_identifier", bgp_identifier);
+  vector record;
+  record.emplace_back(std::move(header.timestamp));
+  record.emplace_back(std::move(version));
+  record.emplace_back(std::move(my_autonomous_system));
+  record.emplace_back(std::move(hold_time));
+  record.emplace_back(std::move(bgp_identifier));
+  event e{{std::move(record), mrt_bgp4mp_open_type}};
+  e.timestamp(header.timestamp);
+  event_queue.push_back(e);
   return true;
 }
 
-bool mrt_parser::parse_bgp4mp_message_update(bool as4, std::vector<char>& raw) {
+bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
+                                             mrt_header& header,
+                                             bgp4mp_info& info,
+                                             std::vector<event> &event_queue) {
+  using namespace parsers;
+  auto count8 = byte->*[](uint8_t x) { return count{x}; };
+  auto count16 = b16be->*[](uint16_t x) { return count{x}; };
   /*
   RFC 4271 https://tools.ietf.org/html/rfc4271
   4.3.  UPDATE Message Format
@@ -259,6 +287,13 @@ bool mrt_parser::parse_bgp4mp_message_update(bool as4, std::vector<char>& raw) {
     |   Network Layer Reachability Information (variable) |
     +-----------------------------------------------------+
   */
+  count withdrawn_routes_length;
+  std::vector<subnet> prefix;
+  if (! count16(raw, withdrawn_routes_length))
+    return false;
+  raw = std::vector<char>((raw.begin() + 2), raw.end());
+  VAST_DEBUG("mrt-parser bgp4mp-message-update", "withdrawn_routes_length",
+             withdrawn_routes_length);
   /*
   RFC 4271 https://tools.ietf.org/html/rfc4271
   4.3.  UPDATE Message Format
@@ -269,6 +304,41 @@ bool mrt_parser::parse_bgp4mp_message_update(bool as4, std::vector<char>& raw) {
     |   Prefix (variable)       |
     +---------------------------+
   */
+  auto l = withdrawn_routes_length;
+  while (l > 0) {
+    count length;
+    if (! count8(raw, length))
+      return false;
+    raw = std::vector<char>((raw.begin() + 1), raw.end());
+    count prefix_bytes = length / 8;
+    if (length % 8 != 0) prefix_bytes++;
+    std::array<uint8_t, 16> ip;
+    ip.fill(0);
+    for (auto i = 0u; i < prefix_bytes; i++) {
+      if (! byte(raw, ip[i]))
+        return false;
+      raw = std::vector<char>((raw.begin() + 1), raw.end());
+    }
+    if (info.afi_ipv4) {
+      prefix.push_back(
+        subnet{address{ip.data(), address::ipv4, address::network}, length});
+    } else {
+      prefix.push_back(
+        subnet{address{ip.data(), address::ipv6, address::network}, length});
+    }
+    VAST_DEBUG("mrt-parser bgp4mp-message-update", "prefix", prefix.back());
+    l -= prefix_bytes + 1;
+  }
+  for (auto i = 0u; i < prefix.size(); i++) {
+    vector record;
+    record.emplace_back(std::move(header.timestamp));
+    record.emplace_back(std::move(info.peer_ip_addr));
+    record.emplace_back(std::move(info.peer_as_nr));
+    record.emplace_back(std::move(prefix[i]));
+    event e{{std::move(record), mrt_bgp4mp_withdraw_type}};
+    e.timestamp(header.timestamp);
+    event_queue.push_back(e);
+  }
   return true;
 }
 
@@ -280,8 +350,9 @@ bool mrt_parser::parse_bgp4mp_message_keepalive() {
   return true;
 }
 
-bool mrt_parser::parse_mrt_message_bgp4mp_message(bool as4,
-                                                  std::vector<char>& raw) {
+bool mrt_parser::parse_mrt_message_bgp4mp_message(
+  std::vector<char>& raw, bool as4, mrt_header& header,
+  std::vector<event> &event_queue) {
   using namespace parsers;
   auto count8 = byte->*[](uint8_t x) { return count{x}; };
   auto count16 = b16be->*[](uint16_t x) { return count{x}; };
@@ -323,14 +394,14 @@ bool mrt_parser::parse_mrt_message_bgp4mp_message(bool as4,
   */
   if (as4) {
     auto bgp4mp_message_parser = count32 >> count32 >> count16 >> count16;
-    if(!bgp4mp_message_parser(raw, peer_as_nr, local_as_nr, interface_index,
-                              addr_family))
+    if(! bgp4mp_message_parser(raw, peer_as_nr, local_as_nr, interface_index,
+                               addr_family))
       return false;
     raw = std::vector<char>((raw.begin() + 12), raw.end());
   } else {
     auto bgp4mp_message_parser = count16 >> count16 >> count16 >> count16;
-    if(!bgp4mp_message_parser(raw, peer_as_nr, local_as_nr, interface_index,
-                              addr_family))
+    if(! bgp4mp_message_parser(raw, peer_as_nr, local_as_nr, interface_index,
+                               addr_family))
       return false;
     raw = std::vector<char>((raw.begin() + 8), raw.end());
   }
@@ -346,12 +417,12 @@ bool mrt_parser::parse_mrt_message_bgp4mp_message(bool as4,
   */
   if (addr_family == 1) {
     auto bgp4mp_message_parser = ipv4 >> ipv4;
-    if (!bgp4mp_message_parser(raw, peer_ip_addr, local_ip_addr))
+    if (! bgp4mp_message_parser(raw, peer_ip_addr, local_ip_addr))
       return false;
     raw = std::vector<char>((raw.begin() + 8), raw.end());
   } else if (addr_family == 2) {
     auto bgp4mp_message_parser = ipv6 >> ipv6;
-    if (!bgp4mp_message_parser(raw, peer_ip_addr, local_ip_addr))
+    if (! bgp4mp_message_parser(raw, peer_ip_addr, local_ip_addr))
       return false;
     raw = std::vector<char>((raw.begin() + 32), raw.end());
   } else {
@@ -380,7 +451,7 @@ bool mrt_parser::parse_mrt_message_bgp4mp_message(bool as4,
   count length;
   count type;
   auto bgp4mp_message_parser = count16 >> count8;
-  if (!bgp4mp_message_parser(raw, length, type))
+  if (! bgp4mp_message_parser(raw, length, type))
     return false;
   raw = std::vector<char>((raw.begin() + 3), raw.end());
   VAST_DEBUG("mrt-parser bgp4mp-message", "length", length, "type", type);
@@ -393,10 +464,15 @@ bool mrt_parser::parse_mrt_message_bgp4mp_message(bool as4,
     3 - NOTIFICATION
     4 - KEEPALIVE
   */
+  bgp4mp_info info;
+  info.as4 = as4;
+  info.afi_ipv4 = (addr_family == 1);
+  info.peer_as_nr = peer_as_nr;
+  info.peer_ip_addr = peer_ip_addr;
   if (type == 1) {
-    return parse_bgp4mp_message_open(as4, raw);
+    return parse_bgp4mp_message_open(raw, header, info, event_queue);
   } else if (type == 2) {
-    return parse_bgp4mp_message_update(as4, raw);
+    return parse_bgp4mp_message_update(raw, header, info, event_queue);
   } else if (type == 3) {
     return parse_bgp4mp_message_notification();
   } else if (type == 4) {
@@ -408,7 +484,8 @@ bool mrt_parser::parse_mrt_message_bgp4mp_message(bool as4,
 }
 
 bool mrt_parser::parse_mrt_message_bgp4mp(std::vector<char>& raw,
-                                          mrt_header& header) {
+                                          mrt_header& header,
+                                          std::vector<event>& event_queue) {
   /*
   RFC 6396 https://tools.ietf.org/html/rfc6396
   4.4.  BGP4MP Type
@@ -421,13 +498,15 @@ bool mrt_parser::parse_mrt_message_bgp4mp(std::vector<char>& raw,
     7    BGP4MP_MESSAGE_AS4_LOCAL
   */
   if (header.subtype == 0) {
-    return parse_mrt_message_bgp4mp_state_change(false, raw);
+    return parse_mrt_message_bgp4mp_state_change(raw, false, header,
+                                                 event_queue);
   } else if (header.subtype == 1) {
-    return parse_mrt_message_bgp4mp_message(false, raw);
+    return parse_mrt_message_bgp4mp_message(raw, false, header, event_queue);
   } else if (header.subtype == 4) {
-    return parse_mrt_message_bgp4mp_message(true, raw);
+    return parse_mrt_message_bgp4mp_message(raw, true, header, event_queue);
   } else if (header.subtype == 5) {
-    return parse_mrt_message_bgp4mp_state_change(true, raw);
+    return parse_mrt_message_bgp4mp_state_change(raw, true, header,
+                                                 event_queue);
   } else {
     VAST_WARNING("mrt-parser", "Unsupported MRT BGP4MP subtype",
                  header.subtype);
@@ -436,11 +515,12 @@ bool mrt_parser::parse_mrt_message_bgp4mp(std::vector<char>& raw,
 }
 
 bool mrt_parser::parse_mrt_message_bgp4mp_et(std::vector<char>& raw,
-                                             mrt_header& header) {
+                                             mrt_header& header,
+                                             std::vector<event>& event_queue) {
   using namespace parsers;
   using namespace std::chrono;
   auto ustime32 = b32be->*[](uint32_t x) {
-    return vast::timestamp{microseconds(x)};
+    return vast::timespan{microseconds(x)};
   };
   /*
   RFC 6396 https://tools.ietf.org/html/rfc6396
@@ -455,32 +535,31 @@ bool mrt_parser::parse_mrt_message_bgp4mp_et(std::vector<char>& raw,
     value.
     [...]
   */
-  vast::timestamp timestamp_et;
-  auto mrt_et_parser = ustime32;
-  if (!mrt_et_parser(raw, timestamp_et))
+  vast::timespan timestamp_et;
+  if (! ustime32(raw, timestamp_et))
     return false;
-  //header.timestamp += timestamp_et; TODO
+  header.timestamp += timestamp_et;
   raw = std::vector<char>((raw.begin() + 4), raw.end());
   VAST_DEBUG("mrt-parser bgp4mp-message-et", "timestamp", header.timestamp);
-  return parse_mrt_message_bgp4mp(raw, header);
+  return parse_mrt_message_bgp4mp(raw, header, event_queue);
 }
 
 bool mrt_parser::parse(std::istream& input, std::vector<event>& event_queue) {
   mrt_header header;
   std::vector<char> raw(mrt_header_length);
   input.read(raw.data(), mrt_header_length);
-  if (!input) {
+  if (! input) {
     if(input.eof())
       return true;
     VAST_ERROR("mrt-parser", "Only", input.gcount(), "of", mrt_header_length,
                  "bytes could be read from stream");
     return false;
   }
-  if (!parse_mrt_header(raw, header))
+  if (! parse_mrt_header(raw, header))
     return false;
   raw.resize(header.length);
   input.read(raw.data(), header.length);
-  if (!input) {
+  if (! input) {
     VAST_ERROR("mrt-parser", "Only", input.gcount(), "of", header.length,
                  "bytes could be read from stream");
     return false;
@@ -501,9 +580,9 @@ bool mrt_parser::parse(std::istream& input, std::vector<event>& event_queue) {
   if (header.type == 13) {
     return parse_mrt_message_table_dump_v2(raw, header);
   } else if (header.type == 16) {
-    return parse_mrt_message_bgp4mp(raw, header);
+    return parse_mrt_message_bgp4mp(raw, header, event_queue);
   } else if (header.type == 17) {
-    return parse_mrt_message_bgp4mp_et(raw, header);
+    return parse_mrt_message_bgp4mp_et(raw, header, event_queue);
   } else {
     VAST_WARNING("mrt-parser", "Unsupported MRT type", header.type);
     return false;
@@ -515,7 +594,7 @@ reader::reader(std::unique_ptr<std::istream> input) : input_{std::move(input)} {
 }
 
 expected<event> reader::read() {
-  if (!event_queue_.empty()) {
+  if (! event_queue_.empty()) {
     event current_event = event_queue_.back();
     event_queue_.pop_back();
     return std::move(current_event);
@@ -523,10 +602,10 @@ expected<event> reader::read() {
   if (input_->eof()) {
     return make_error(ec::end_of_input, "input exhausted");
   }
-  if (!parser_.parse(*input_, event_queue_)) {
+  if (! parser_.parse(*input_, event_queue_)) {
     return make_error(ec::parse_error, "parse error");
   }
-  if (!event_queue_.empty()) {
+  if (! event_queue_.empty()) {
     event current_event = event_queue_.back();
     event_queue_.pop_back();
     return std::move(current_event);
@@ -546,7 +625,7 @@ expected<void> reader::schema(vast::schema const& sch) {
   };
   for (auto t : types)
     if (auto u = sch.find(t->name())) {
-      if (!congruent(*t, *u))
+      if (! congruent(*t, *u))
         return make_error(ec::format_error, "incongruent type:", t->name());
       else
         *t = *u;
