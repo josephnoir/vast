@@ -8,6 +8,10 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/vast/config.hpp.in
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
+# get header files; only needed by CMake generators,
+# e.g., for creating proper Xcode projects
+file(GLOB_RECURSE libvast_headers "vast/*.hpp")
+
 set(libvast_sources
   ${aux_sources}
   src/address.cpp
@@ -108,7 +112,7 @@ if (GPERFTOOLS_FOUND AND VAST_USE_PERFTOOLS_HEAP_PROFILER)
   set(libvast_libs ${libvast_libs} ${GPERFTOOLS_TCMALLOC})
 endif ()
 
-add_library(libvast SHARED ${libvast_sources})
+add_library(libvast SHARED ${libvast_sources} ${libvast_headers})
 set_target_properties(libvast
   PROPERTIES
   SOVERSION ${VERSION_MAJOR}
