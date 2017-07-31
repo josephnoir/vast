@@ -272,6 +272,13 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
   using namespace parsers;
   auto count8 = byte->*[](uint8_t x) { return count{x}; };
   auto count16 = b16be->*[](uint16_t x) { return count{x}; };
+  auto count32 = b32be->*[](uint32_t x) { return count{x}; };
+  auto ipv4 = b32be->*[](uint32_t x) {
+    return address{&x, address::ipv4, address::host};
+  };
+  auto ipv6 = bytes<16>->*[](std::array<uint8_t, 16> x) {
+    return address{x.data(), address::ipv6, address::host};
+  };
   /*
   RFC 4271 https://tools.ietf.org/html/rfc4271
   4.3.  UPDATE Message Format
@@ -288,7 +295,7 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
     +-----------------------------------------------------+
   */
   count withdrawn_routes_length;
-  std::vector<subnet> prefix;
+  count total_path_attribute_length;
   if (! count16(raw, withdrawn_routes_length))
     return false;
   raw = std::vector<char>((raw.begin() + 2), raw.end());
@@ -304,10 +311,11 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
     |   Prefix (variable)       |
     +---------------------------+
   */
+  std::vector<subnet> prefix;
   auto l = withdrawn_routes_length;
   while (l > 0) {
-    count length;
-    if (! count8(raw, length))
+    uint8_t length;
+    if (! byte(raw, length))
       return false;
     raw = std::vector<char>((raw.begin() + 1), raw.end());
     count prefix_bytes = length / 8;
@@ -326,7 +334,8 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
       prefix.push_back(
         subnet{address{ip.data(), address::ipv6, address::network}, length});
     }
-    VAST_DEBUG("mrt-parser bgp4mp-message-update", "prefix", prefix.back());
+    VAST_DEBUG("mrt-parser bgp4mp-message-update-withdrawn", "prefix",
+               prefix.back());
     l -= prefix_bytes + 1;
   }
   for (auto i = 0u; i < prefix.size(); i++) {
@@ -338,6 +347,145 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
     event e{{std::move(record), mrt_bgp4mp_withdraw_type}};
     e.timestamp(header.timestamp);
     event_queue.push_back(e);
+  }
+  if (! count16(raw, total_path_attribute_length))
+    return false;
+  raw = std::vector<char>((raw.begin() + 2), raw.end());
+  VAST_DEBUG("mrt-parser bgp4mp-message-update", "total_path_attribute_length",
+             total_path_attribute_length);
+  /*
+  RFC 4271 https://tools.ietf.org/html/rfc4271
+  4.3.  UPDATE Message Format
+  Path Attributes
+    [...]
+    Each path attribute is a triple <attribute type, attribute length, attribute
+    value> of variable length.
+    attribute type
+      0                   1
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |  Attr. Flags  |Attr. Type Code|
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  */
+  std::string origin;
+  std::vector<count> as_path;
+  address next_hop;
+  count multi_exit_disc;
+  count local_pref;
+  l = total_path_attribute_length;
+  while (l > 0) {
+    uint8_t attr_flags;
+    uint8_t attr_type_code;
+    count attr_length;
+    auto bgp4mp_attribute_type_parser = byte >> byte;
+    if (! bgp4mp_attribute_type_parser(raw, attr_flags, attr_type_code))
+      return false;
+    raw = std::vector<char>((raw.begin() + 2), raw.end());
+    /*
+    RFC 4271 https://tools.ietf.org/html/rfc4271
+    4.3.  UPDATE Message Format
+    Path Attributes
+      The fourth high-order bit (bit 3) of the Attribute Flags octet is the
+      Extended Length bit. It defines whether the Attribute Length is one octet
+      (if set to 0) or two octets (if set to 1).
+    */
+    bool attr_extended_length_bit = static_cast<bool>((attr_flags & 16) >> 4);
+    if (attr_extended_length_bit) {
+      if (! count16(raw, attr_length))
+        return false;
+      raw = std::vector<char>((raw.begin() + 2), raw.end());
+    } else {
+      if (! count8(raw, attr_length))
+        return false;
+      raw = std::vector<char>((raw.begin() + 1), raw.end());
+    }
+    /*
+    RFC 4271 https://tools.ietf.org/html/rfc4271
+    4.3.  UPDATE Message Format
+    Path Attributes
+      a) ORIGIN (Type Code 1)
+    */
+    if (attr_type_code == 1) {
+      count value;
+      if (! count8(raw, value))
+        return false;
+      if (value == 0) origin = "IGP";
+      else if (value == 1) origin = "EGP";
+      else if (value == 2) origin = "INCOMPLETE";
+    }
+    /*
+    RFC 4271 https://tools.ietf.org/html/rfc4271
+    4.3.  UPDATE Message Format
+    Path Attributes
+      b) AS_PATH (Type Code 2)
+    */
+    else if (attr_type_code == 2) {
+      count path_segment_type;
+      count path_segment_length;
+      count path_segment_value;
+      auto bgp4mp_as_path_parser = count8 >> count8;
+      if (! bgp4mp_as_path_parser(raw, path_segment_type, path_segment_length))
+        return false;
+      for (auto i = 0u; i < path_segment_length; i++) {
+        /*
+        RFC 6396 https://tools.ietf.org/html/rfc6396
+        4.4.3.  BGP4MP_MESSAGE_AS4 Subtype
+          [...] The AS_PATH in these messages MUST only
+          consist of 4-byte AS numbers. [...]
+        */
+        if (info.as4) {
+          if (! count32(raw, path_segment_value))
+            return false;
+        } else {
+          if (! count16(raw, path_segment_value))
+            return false;
+        }
+        as_path.push_back(path_segment_value);
+      }
+    }
+    /*
+    RFC 4271 https://tools.ietf.org/html/rfc4271
+    4.3.  UPDATE Message Format
+    Path Attributes
+      c) NEXT_HOP (Type Code 3)
+    */
+    else if (attr_type_code == 3) {
+      if (attr_length == 4) {
+        if (! ipv4(raw, next_hop))
+          return false;
+      } else if (attr_length == 16) {
+        if (! ipv6(raw, next_hop))
+          return false;
+      }
+    }
+    /*
+    RFC 4271 https://tools.ietf.org/html/rfc4271
+    4.3.  UPDATE Message Format
+    Path Attributes
+      d) MULTI_EXIT_DISC (Type Code 4)
+    */
+    else if (attr_type_code == 4) {
+      if (! count32(raw, multi_exit_disc))
+        return false;
+    }
+    /*
+    RFC 4271 https://tools.ietf.org/html/rfc4271
+    4.3.  UPDATE Message Format
+    Path Attributes
+      e) LOCAL_PREF (Type Code 5)
+    */
+    else if (attr_type_code == 5) {
+      if (! count32(raw, local_pref))
+        return false;
+    } else {
+      VAST_WARNING("mrt-parser", "Unsupported BGP4MP path attribute type",
+                   static_cast<uint16_t>(attr_type_code));
+    }
+    raw = std::vector<char>((raw.begin() + attr_length), raw.end());
+    if (attr_extended_length_bit)
+      l -= attr_length + 4;
+    else
+      l -= attr_length + 3;
   }
   return true;
 }
