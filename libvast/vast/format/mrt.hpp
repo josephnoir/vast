@@ -9,11 +9,13 @@
 #include "vast/expected.hpp"
 #include "vast/schema.hpp"
 #include "vast/address.hpp"
+#include "vast/data.hpp"
 #include "vast/concept/parseable/core.hpp"
 #include "vast/concept/parseable/numeric.hpp"
 #include "vast/concept/parseable/string.hpp"
 #include "vast/concept/parseable/vast/data.hpp"
 #include "vast/concept/printable/std/chrono.hpp"
+#include "vast/concept/printable/vast/data.hpp"
 #include "vast/concept/printable/vast/address.hpp"
 #include "vast/concept/printable/vast/subnet.hpp"
 
@@ -39,11 +41,14 @@ struct mrt_parser {
     bool afi_ipv4;
     count peer_as_nr = 0;
     address peer_ip_addr;
+    count length = 0;
   };
 
   mrt_parser();
 
   bool parse_mrt_header(std::vector<char>& raw, mrt_header& header);
+  bool parse_bgp4mp_prefix(std::vector<char>& raw, bgp4mp_info& info,
+                           count length, std::vector<subnet>& prefix);
   bool parse_mrt_message_table_dump_v2(std::vector<char>& raw,
                                        mrt_header& header);
   bool parse_mrt_message_bgp4mp_state_change(std::vector<char>& raw, bool as4,
