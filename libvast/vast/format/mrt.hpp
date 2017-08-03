@@ -47,8 +47,8 @@ struct mrt_parser {
   mrt_parser();
 
   bool parse_mrt_header(std::vector<char>& raw, mrt_header& header);
-  bool parse_bgp4mp_prefix(std::vector<char>& raw, bgp4mp_info& info,
-                           count length, std::vector<subnet>& prefix);
+  bool parse_bgp4mp_prefix(std::vector<char>& raw, bool afi_ipv4, count length,
+                           std::vector<subnet>& prefix);
   bool parse_mrt_message_table_dump_v2(std::vector<char>& raw,
                                        mrt_header& header);
   bool parse_mrt_message_bgp4mp_state_change(std::vector<char>& raw, bool as4,

@@ -102,7 +102,7 @@ bool mrt_parser::parse_mrt_header(std::vector<char>& raw, mrt_header& header) {
   return true;
 }
 
-bool mrt_parser::parse_bgp4mp_prefix(std::vector<char>& raw, bgp4mp_info& info,
+bool mrt_parser::parse_bgp4mp_prefix(std::vector<char>& raw, bool afi_ipv4,
                                      count length,
                                      std::vector<subnet>& prefix) {
   using namespace parsers;
@@ -123,14 +123,13 @@ bool mrt_parser::parse_bgp4mp_prefix(std::vector<char>& raw, bgp4mp_info& info,
     raw = std::vector<char>((raw.begin() + 1), raw.end());
     count prefix_bytes = prefix_length / 8;
     if (prefix_length % 8 != 0) prefix_bytes++;
-    std::array<uint8_t, 16> ip;
-    ip.fill(0);
+    std::array<uint8_t, 16> ip{};
     for (auto i = 0u; i < prefix_bytes; i++) {
       if (! byte(raw, ip[i]))
         return false;
       raw = std::vector<char>((raw.begin() + 1), raw.end());
     }
-    if (info.afi_ipv4) {
+    if (afi_ipv4) {
       prefix.push_back(
         subnet{address{ip.data(), address::ipv4, address::network},
                prefix_length});
@@ -159,9 +158,9 @@ bool mrt_parser::parse_mrt_message_bgp4mp_state_change(
   auto ipv4 = b32be->*[](uint32_t x) {
     return address{&x, address::ipv4, address::host};
   };
-  auto ipv6 = bytes<16>->*[](std::array<uint8_t, 16> x) {
-    return address{x.data(), address::ipv6, address::host};
-  };
+  // auto ipv6 = bytes<16>->*[](std::array<uint8_t, 16> x) {
+  //   return address{x.data(), address::ipv6, address::network};
+  // };
   /*
   RFC 6396 https://tools.ietf.org/html/rfc6396
   4.4.1.  BGP4MP_STATE_CHANGE Subtype
@@ -222,10 +221,16 @@ bool mrt_parser::parse_mrt_message_bgp4mp_state_change(
                                      old_state, new_state))
       return false;
   } else if (addr_family == 2) {
-    auto bgp4mp_state_change_parser = ipv6 >> ipv6 >> count16 >> count16;
-    if (! bgp4mp_state_change_parser(raw, peer_ip_addr, local_ip_addr,
+    std::array<uint8_t, 16> peer_ip_addr_a{};
+    std::array<uint8_t, 16> local_ip_addr_a{};
+    auto bgp4mp_state_change_parser = bytes<16> >> bytes<16> >> count16 >> count16;
+    if (! bgp4mp_state_change_parser(raw, peer_ip_addr_a, local_ip_addr_a,
                                      old_state, new_state))
       return false;
+    peer_ip_addr = address{peer_ip_addr_a.data(), address::ipv6,
+                           address::network};
+    local_ip_addr = address{local_ip_addr_a.data(), address::ipv6,
+                            address::network};
   } else {
     return false;
   }
@@ -319,9 +324,9 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
   auto ipv4 = b32be->*[](uint32_t x) {
     return address{&x, address::ipv4, address::host};
   };
-  auto ipv6 = bytes<16>->*[](std::array<uint8_t, 16> x) {
-    return address{x.data(), address::ipv6, address::host};
-  };
+  // auto ipv6 = bytes<16>->*[](std::array<uint8_t, 16> x) {
+  //   return address{x.data(), address::ipv6, address::network};
+  // };
   /*
   RFC 4271 https://tools.ietf.org/html/rfc4271
   4.3.  UPDATE Message Format
@@ -345,7 +350,8 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
   raw = std::vector<char>((raw.begin() + 2), raw.end());
   VAST_DEBUG("mrt-parser bgp4mp-message-update", "withdrawn_routes_length",
              withdrawn_routes_length);
-  if (! parse_bgp4mp_prefix(raw, info, withdrawn_routes_length, prefix))
+  if (! parse_bgp4mp_prefix(raw, info.afi_ipv4, withdrawn_routes_length,
+                            prefix))
     return false;
   for (auto i = 0u; i < prefix.size(); i++) {
     VAST_DEBUG("mrt-parser bgp4mp-message-update-withdrawn", "prefix",
@@ -359,6 +365,7 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
     e.timestamp(header.timestamp);
     event_queue.push_back(e);
   }
+  prefix.clear();
   if (! count16(raw, total_path_attribute_length))
     return false;
   raw = std::vector<char>((raw.begin() + 2), raw.end());
@@ -413,6 +420,7 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
         return false;
       raw = std::vector<char>((raw.begin() + 1), raw.end());
     }
+    VAST_DEBUG("mrt-parser bgp4mp-message-update", "attr_length", attr_length);
     /*
     RFC 4271 https://tools.ietf.org/html/rfc4271
     4.3.  UPDATE Message Format
@@ -470,13 +478,8 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
       c) NEXT_HOP (Type Code 3)
     */
     else if (attr_type_code == 3) {
-      if (attr_length == 4) {
-        if (! ipv4(raw, next_hop))
-          return false;
-      } else if (attr_length == 16) {
-        if (! ipv6(raw, next_hop))
-          return false;
-      }
+      if (! ipv4(raw, next_hop))
+        return false;
       VAST_DEBUG("mrt-parser bgp4mp-message-update", "next_hop", next_hop);
     }
     /*
@@ -530,16 +533,103 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
           return false;
         t_raw = std::vector<char>((raw.begin() + 4), raw.end());
       }
-      if (info.afi_ipv4) {
-        if (! ipv4(t_raw, aggregator_ip_address))
-          return false;
-      } else {
-        if (! ipv6(t_raw, aggregator_ip_address))
-          return false;
-      }
+      if (! ipv4(t_raw, aggregator_ip_address))
+        return false;
       VAST_DEBUG("mrt-parser bgp4mp-message-update",
                  "aggregator_last_as_number", aggregator_last_as_number,
                  "aggregator_ip_address", aggregator_ip_address);
+    }
+    /*
+    RFC 1997 https://tools.ietf.org/html/rfc1997
+    COMMUNITIES attribute
+      The COMMUNITIES attribute has Type Code 8.
+    */
+    else if (attr_type_code == 8) {
+      
+    }
+    /*
+    RFC 4760 https://tools.ietf.org/html/rfc4760
+    3.  Multiprotocol Reachable NLRI - MP_REACH_NLRI (Type Code 14)
+      +---------------------------------------------------------+
+      | Address Family Identifier (2 octets)                    |
+      +---------------------------------------------------------+
+      | Subsequent Address Family Identifier (1 octet)          |
+      +---------------------------------------------------------+
+      | Length of Next Hop Network Address (1 octet)            |
+      +---------------------------------------------------------+
+      | Network Address of Next Hop (variable)                  |
+      +---------------------------------------------------------+
+      | Reserved (1 octet)                                      |
+      +---------------------------------------------------------+
+      | Network Layer Reachability Information (variable)       |
+      +---------------------------------------------------------+
+    */
+    else if (attr_type_code == 14) {
+      count address_family_identifier = 0;
+      count subsequent_address_family_identifier = 0;
+      count next_hop_network_address_length = 0;
+      address mp_next_hop;
+      count mp_nlri_length = 0;
+      auto mp_reach_nlri_parser = count16 >> count8 >> count8;
+      if (! mp_reach_nlri_parser(raw, address_family_identifier,
+                                 subsequent_address_family_identifier,
+                                 next_hop_network_address_length))
+        return false;
+      std::vector<char> t_raw = std::vector<char>((raw.begin() + 4), raw.end());
+      mp_nlri_length = attr_length - (5 + next_hop_network_address_length);
+      VAST_DEBUG("mrt-parser bgp4mp-message-update",
+                 "address_family_identifier", address_family_identifier,
+                 "subsequent_address_family_identifier",
+                 subsequent_address_family_identifier,
+                 "next_hop_network_address_length",
+                 next_hop_network_address_length, "mp_nlri_length",
+                 mp_nlri_length);
+      if (address_family_identifier == 1) {
+        if (! ipv4(t_raw, mp_next_hop))
+          return false;
+        // + Reserved
+        t_raw = std::vector<char>((t_raw.begin() + 5), t_raw.end());
+      } else if (address_family_identifier == 2) {
+        std::array<uint8_t, 16> mp_next_hop_a{};
+        if (! bytes<16>(t_raw, mp_next_hop_a))
+          return false;
+        mp_next_hop = address{mp_next_hop_a.data(), address::ipv6,
+                              address::network};
+        // + Reserved
+        t_raw = std::vector<char>((t_raw.begin() + 17), t_raw.end());
+      } else {
+        VAST_WARNING("mrt-parser bgp4mp-message-update",
+                     "Unsupported MP_REACH_NLRI address family identifier",
+                     address_family_identifier);
+        return false;
+      }
+      VAST_DEBUG("mrt-parser bgp4mp-message-update", "mp_next_hop",
+                 mp_next_hop);
+      if (! parse_bgp4mp_prefix(t_raw, (address_family_identifier == 1),
+                                mp_nlri_length, prefix))
+        return false;
+      for (auto i = 0u; i < prefix.size(); i++) {
+        VAST_DEBUG("mrt-parser bgp4mp-message-update-announce", "prefix",
+                   prefix[i]);
+        vector record;
+        record.emplace_back(std::move(header.timestamp));
+        record.emplace_back(std::move(info.peer_ip_addr));
+        record.emplace_back(std::move(info.peer_as_nr));
+        record.emplace_back(std::move(prefix[i]));
+        record.emplace_back(std::move(as_path));
+        record.emplace_back(std::move(origin));
+        record.emplace_back(std::move(mp_next_hop));
+        record.emplace_back(std::move(local_pref));
+        record.emplace_back(std::move(multi_exit_disc));
+        record.emplace_back(std::move("TODO"));
+        record.emplace_back(std::move(atomic_aggregate));
+        record.emplace_back(std::move(to_string(aggregator_last_as_number) +
+                                      ' ' + to_string(aggregator_ip_address)));
+        event e{{std::move(record), mrt_bgp4mp_announce_type}};
+        e.timestamp(header.timestamp);
+        event_queue.push_back(e);
+      }
+      prefix.clear();
     }
     else {
       VAST_WARNING("mrt-parser bgp4mp-message-update",
@@ -566,8 +656,7 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
   VAST_DEBUG("mrt-parser bgp4mp-message-update",
              "network_layer_reachability_information_length",
              network_layer_reachability_information_length);
-  prefix.clear();
-  if (! parse_bgp4mp_prefix(raw, info,
+  if (! parse_bgp4mp_prefix(raw, info.afi_ipv4,
                             network_layer_reachability_information_length,
                             prefix))
     return false;
@@ -592,6 +681,7 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
     e.timestamp(header.timestamp);
     event_queue.push_back(e);
   }
+  prefix.clear();
   return true;
 }
 
@@ -613,9 +703,9 @@ bool mrt_parser::parse_mrt_message_bgp4mp_message(
   auto ipv4 = b32be->*[](uint32_t x) {
     return address{&x, address::ipv4, address::host};
   };
-  auto ipv6 = bytes<16>->*[](std::array<uint8_t, 16> x) {
-    return address{x.data(), address::ipv6, address::host};
-  };
+  // auto ipv6 = bytes<16>->*[](std::array<uint8_t, 16> x) {
+  //   return address{x.data(), address::ipv6, address::network};
+  // };
   /*
   RFC 6396 https://tools.ietf.org/html/rfc6396
   4.4.2.  BGP4MP_MESSAGE Subtype
@@ -674,9 +764,15 @@ bool mrt_parser::parse_mrt_message_bgp4mp_message(
       return false;
     raw = std::vector<char>((raw.begin() + 8), raw.end());
   } else if (addr_family == 2) {
-    auto bgp4mp_message_parser = ipv6 >> ipv6;
-    if (! bgp4mp_message_parser(raw, peer_ip_addr, local_ip_addr))
+    std::array<uint8_t, 16> peer_ip_addr_a{};
+    std::array<uint8_t, 16> local_ip_addr_a{};
+    auto bgp4mp_message_parser = bytes<16> >> bytes<16>;
+    if (! bgp4mp_message_parser(raw, peer_ip_addr_a, local_ip_addr_a))
       return false;
+    peer_ip_addr = address{peer_ip_addr_a.data(), address::ipv6,
+                           address::network};
+    local_ip_addr = address{local_ip_addr_a.data(), address::ipv6,
+                            address::network};
     raw = std::vector<char>((raw.begin() + 32), raw.end());
   } else {
     return false;
