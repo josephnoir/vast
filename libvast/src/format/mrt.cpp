@@ -17,9 +17,10 @@ mrt_parser::mrt_parser() {
     {"nexthop", address_type{}},
     {"local_pref", count_type{}},
     {"med", count_type{}},
-    {"community", string_type{}},
+    {"community", count_type{}},
     {"atomic_aggregate", boolean_type{}},
-    {"aggregator", string_type{}},
+    {"aggregator_as", count_type{}},
+    {"aggregator_ip", address_type{}},
   };
   mrt_bgp4mp_announce_type = record_type{fields};
   mrt_bgp4mp_announce_type.name("mrt::bgp4mp::announcement");
@@ -40,8 +41,8 @@ mrt_parser::mrt_parser() {
     {"timestamp", timestamp_type{}},
     {"source_ip", address_type{}},
     {"source_as", count_type{}},
-    {"old_state", string_type{}},
-    {"new_state", string_type{}},
+    {"old_state", count_type{}},
+    {"new_state", count_type{}},
   };
   mrt_bgp4mp_state_change_type = record_type{std::move(state_change_fields)};
   mrt_bgp4mp_state_change_type.name("mrt::bgp4mp::state_change");
@@ -385,8 +386,9 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
   count multi_exit_disc;
   count local_pref;
   bool atomic_aggregate = false;
-  count aggregator_last_as_number;
-  address aggregator_ip_address;
+  count aggregator_as;
+  address aggregator_ip;
+  count community;
   count l = total_path_attribute_length;
   while (l > 0) {
     uint8_t attr_flags;
@@ -519,27 +521,28 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
     else if (attr_type_code == 7) {
       std::vector<char> t_raw;
       if (info.as4) {
-        if (! count16(raw, aggregator_last_as_number))
+        if (! count16(raw, aggregator_as))
           return false;
         t_raw = std::vector<char>((raw.begin() + 2), raw.end());
       } else {
-        if (! count32(raw, aggregator_last_as_number))
+        if (! count32(raw, aggregator_as))
           return false;
         t_raw = std::vector<char>((raw.begin() + 4), raw.end());
       }
-      if (! ipv4(t_raw, aggregator_ip_address))
+      if (! ipv4(t_raw, aggregator_ip))
         return false;
-      VAST_DEBUG("mrt-parser bgp4mp-message-update",
-                 "aggregator_last_as_number", aggregator_last_as_number,
-                 "aggregator_ip_address", aggregator_ip_address);
+      VAST_DEBUG("mrt-parser bgp4mp-message-update", "aggregator_as",
+                 aggregator_as, "aggregator_ip", aggregator_ip);
     }
     /*
     RFC 1997 https://tools.ietf.org/html/rfc1997
-    COMMUNITIES attribute
-      The COMMUNITIES attribute has Type Code 8.
+    COMMUNITIES attribute (Type Code 8)
+      [...] The attribute consists of a set of four octet values, each of which
+      specify a community. [...]
     */
     else if (attr_type_code == 8) {
-
+      if (! count32(raw, community))
+        return false;
     }
     /*
     RFC 4760 https://tools.ietf.org/html/rfc4760
@@ -612,10 +615,10 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
         record.emplace_back(std::move(mp_next_hop));
         record.emplace_back(std::move(local_pref));
         record.emplace_back(std::move(multi_exit_disc));
-        record.emplace_back(std::move("TODO"));
+        record.emplace_back(std::move(community));
         record.emplace_back(std::move(atomic_aggregate));
-        record.emplace_back(std::move(to_string(aggregator_last_as_number) +
-                                      ' ' + to_string(aggregator_ip_address)));
+        record.emplace_back(std::move(aggregator_as));
+        record.emplace_back(std::move(aggregator_ip));
         event e{{std::move(record), mrt_bgp4mp_announce_type}};
         e.timestamp(header.timestamp);
         event_queue.push_back(e);
@@ -664,10 +667,10 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
     record.emplace_back(std::move(next_hop));
     record.emplace_back(std::move(local_pref));
     record.emplace_back(std::move(multi_exit_disc));
-    record.emplace_back(std::move("TODO"));
+    record.emplace_back(std::move(community));
     record.emplace_back(std::move(atomic_aggregate));
-    record.emplace_back(std::move(to_string(aggregator_last_as_number) + ' ' +
-                                  to_string(aggregator_ip_address)));
+    record.emplace_back(std::move(aggregator_as));
+    record.emplace_back(std::move(aggregator_ip));
     event e{{std::move(record), mrt_bgp4mp_announce_type}};
     e.timestamp(header.timestamp);
     event_queue.push_back(e);
