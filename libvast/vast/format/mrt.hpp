@@ -60,8 +60,11 @@ struct mrt_parser {
   bool parse_bgp4mp_message_update(std::vector<char>& raw, mrt_header& header,
                                    bgp4mp_info& info,
                                    std::vector<event>& event_queue);
-  bool parse_bgp4mp_message_notification();
-  bool parse_bgp4mp_message_keepalive();
+  bool parse_bgp4mp_message_notification(std::vector<char>& raw,
+                                         mrt_header& header,
+                                         std::vector<event>& event_queue);
+  bool parse_bgp4mp_message_keepalive(mrt_header& header,
+                                      std::vector<event>& event_queue);
   bool parse_mrt_message_bgp4mp_message(std::vector<char>& raw, bool as4,
                                         mrt_header& header,
                                         std::vector<event> &event_queue);
