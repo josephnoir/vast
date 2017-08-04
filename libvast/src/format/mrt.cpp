@@ -158,9 +158,9 @@ bool mrt_parser::parse_mrt_message_bgp4mp_state_change(
   auto ipv4 = b32be->*[](uint32_t x) {
     return address{&x, address::ipv4, address::host};
   };
-  // auto ipv6 = bytes<16>->*[](std::array<uint8_t, 16> x) {
-  //   return address{x.data(), address::ipv6, address::network};
-  // };
+  auto ipv6 = bytes<16>->*[](std::array<uint8_t, 16> x) {
+    return address{x.data(), address::ipv6, address::network};
+  };
   /*
   RFC 6396 https://tools.ietf.org/html/rfc6396
   4.4.1.  BGP4MP_STATE_CHANGE Subtype
@@ -221,16 +221,10 @@ bool mrt_parser::parse_mrt_message_bgp4mp_state_change(
                                      old_state, new_state))
       return false;
   } else if (addr_family == 2) {
-    std::array<uint8_t, 16> peer_ip_addr_a{};
-    std::array<uint8_t, 16> local_ip_addr_a{};
-    auto bgp4mp_state_change_parser = bytes<16> >> bytes<16> >> count16 >> count16;
-    if (! bgp4mp_state_change_parser(raw, peer_ip_addr_a, local_ip_addr_a,
+    auto bgp4mp_state_change_parser = ipv6 >> ipv6 >> count16 >> count16;
+    if (! bgp4mp_state_change_parser(raw, peer_ip_addr, local_ip_addr,
                                      old_state, new_state))
       return false;
-    peer_ip_addr = address{peer_ip_addr_a.data(), address::ipv6,
-                           address::network};
-    local_ip_addr = address{local_ip_addr_a.data(), address::ipv6,
-                            address::network};
   } else {
     return false;
   }
@@ -324,9 +318,9 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
   auto ipv4 = b32be->*[](uint32_t x) {
     return address{&x, address::ipv4, address::host};
   };
-  // auto ipv6 = bytes<16>->*[](std::array<uint8_t, 16> x) {
-  //   return address{x.data(), address::ipv6, address::network};
-  // };
+  auto ipv6 = bytes<16>->*[](std::array<uint8_t, 16> x) {
+    return address{x.data(), address::ipv6, address::network};
+  };
   /*
   RFC 4271 https://tools.ietf.org/html/rfc4271
   4.3.  UPDATE Message Format
@@ -545,7 +539,7 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
       The COMMUNITIES attribute has Type Code 8.
     */
     else if (attr_type_code == 8) {
-      
+
     }
     /*
     RFC 4760 https://tools.ietf.org/html/rfc4760
@@ -590,11 +584,8 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
         // + Reserved
         t_raw = std::vector<char>((t_raw.begin() + 5), t_raw.end());
       } else if (address_family_identifier == 2) {
-        std::array<uint8_t, 16> mp_next_hop_a{};
-        if (! bytes<16>(t_raw, mp_next_hop_a))
+        if (! ipv6(t_raw, mp_next_hop))
           return false;
-        mp_next_hop = address{mp_next_hop_a.data(), address::ipv6,
-                              address::network};
         // + Reserved
         t_raw = std::vector<char>((t_raw.begin() + 17), t_raw.end());
       } else {
@@ -703,9 +694,9 @@ bool mrt_parser::parse_mrt_message_bgp4mp_message(
   auto ipv4 = b32be->*[](uint32_t x) {
     return address{&x, address::ipv4, address::host};
   };
-  // auto ipv6 = bytes<16>->*[](std::array<uint8_t, 16> x) {
-  //   return address{x.data(), address::ipv6, address::network};
-  // };
+  auto ipv6 = bytes<16>->*[](std::array<uint8_t, 16> x) {
+    return address{x.data(), address::ipv6, address::network};
+  };
   /*
   RFC 6396 https://tools.ietf.org/html/rfc6396
   4.4.2.  BGP4MP_MESSAGE Subtype
@@ -764,15 +755,9 @@ bool mrt_parser::parse_mrt_message_bgp4mp_message(
       return false;
     raw = std::vector<char>((raw.begin() + 8), raw.end());
   } else if (addr_family == 2) {
-    std::array<uint8_t, 16> peer_ip_addr_a{};
-    std::array<uint8_t, 16> local_ip_addr_a{};
-    auto bgp4mp_message_parser = bytes<16> >> bytes<16>;
-    if (! bgp4mp_message_parser(raw, peer_ip_addr_a, local_ip_addr_a))
+    auto bgp4mp_message_parser = ipv6 >> ipv6;
+    if (! bgp4mp_message_parser(raw, peer_ip_addr, local_ip_addr))
       return false;
-    peer_ip_addr = address{peer_ip_addr_a.data(), address::ipv6,
-                           address::network};
-    local_ip_addr = address{local_ip_addr_a.data(), address::ipv6,
-                            address::network};
     raw = std::vector<char>((raw.begin() + 32), raw.end());
   } else {
     return false;
