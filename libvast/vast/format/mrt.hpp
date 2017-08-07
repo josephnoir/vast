@@ -19,6 +19,10 @@
 #include "vast/concept/printable/vast/address.hpp"
 #include "vast/concept/printable/vast/subnet.hpp"
 
+namespace {
+  static constexpr size_t mrt_header_length = 12;
+}
+
 namespace vast {
 namespace format {
 namespace mrt {
@@ -26,8 +30,6 @@ namespace mrt {
 /// A parser that reading bgp messages from MRT files.
 struct mrt_parser {
   using attribute = event;
-
-  static constexpr size_t mrt_header_length = 12;
 
   struct mrt_header {
     vast::timestamp timestamp;
