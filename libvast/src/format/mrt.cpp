@@ -601,19 +601,18 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
       if (address_family_identifier == 1) {
         if (! ipv4(t_raw, mp_next_hop))
           return false;
-        // + Reserved
-        t_raw = std::vector<char>((t_raw.begin() + 5), t_raw.end());
       } else if (address_family_identifier == 2) {
         if (! ipv6(t_raw, mp_next_hop))
           return false;
-        // + Reserved
-        t_raw = std::vector<char>((t_raw.begin() + 17), t_raw.end());
       } else {
         VAST_WARNING("mrt-parser bgp4mp-message-update",
                      "Unsupported MP_REACH_NLRI address family identifier",
                      address_family_identifier);
         return false;
       }
+      // + Reserved
+      t_raw = std::vector<char>(
+        (t_raw.begin() + (next_hop_network_address_length + 1)), t_raw.end());
       VAST_DEBUG("mrt-parser bgp4mp-message-update", "mp_next_hop",
                  mp_next_hop);
       if (! parse_bgp4mp_prefix(t_raw, (address_family_identifier == 1),
