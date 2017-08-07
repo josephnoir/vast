@@ -145,8 +145,7 @@ bool mrt_parser::parse_bgp4mp_prefix(std::vector<char>& raw, bool afi_ipv4,
 }
 
 
-bool mrt_parser::parse_mrt_message_table_dump_v2(std::vector<char>& raw,
-                                                 mrt_header& header) {
+bool mrt_parser::parse_mrt_message_table_dump_v2() {
   return true;
 }
 
@@ -316,6 +315,14 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
   auto count8 = byte->*[](uint8_t x) { return count{x}; };
   auto count16 = b16be->*[](uint16_t x) { return count{x}; };
   auto count32 = b32be->*[](uint32_t x) { return count{x}; };
+  auto count48 = bytes<6>->*[](std::array<uint8_t, 6> x) {
+    uint64_t y = 0;
+    for (auto i = 0; i < 6; i++) {
+      y |= x[i] & 0xFF;
+      y <<= 8;
+    }
+    return count{y};
+  };
   auto ipv4 = b32be->*[](uint32_t x) {
     return address{&x, address::ipv4, address::host};
   };
@@ -416,7 +423,10 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
         return false;
       raw = std::vector<char>((raw.begin() + 1), raw.end());
     }
-    VAST_DEBUG("mrt-parser bgp4mp-message-update", "attr_length", attr_length);
+    VAST_DEBUG("mrt-parser bgp4mp-message-update", "attr_type_code",
+               static_cast<uint16_t>(attr_type_code), "attr_length",
+               attr_length);
+    auto t_raw = std::vector<char>(raw.begin(), (raw.begin() + attr_length));
     /*
     RFC 4271 https://tools.ietf.org/html/rfc4271
     4.3.  UPDATE Message Format
@@ -424,8 +434,8 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
       a) ORIGIN (Type Code 1)
     */
     if (attr_type_code == 1) {
-      count value;
-      if (! count8(raw, value))
+      count value = 0;
+      if (! count8(t_raw, value))
         return false;
       if (value == 0) origin = "IGP";
       else if (value == 1) origin = "EGP";
@@ -443,9 +453,10 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
       count path_segment_length = 0;
       count path_segment_value = 0;
       auto bgp4mp_as_path_parser = count8 >> count8;
-      if (! bgp4mp_as_path_parser(raw, path_segment_type, path_segment_length))
+      if (! bgp4mp_as_path_parser(t_raw, path_segment_type,
+                                  path_segment_length))
         return false;
-      auto t_raw = std::vector<char>((raw.begin() + 2), raw.end());
+      t_raw = std::vector<char>((t_raw.begin() + 2), t_raw.end());
       for (auto i = 0u; i < path_segment_length; i++) {
         /*
         RFC 6396 https://tools.ietf.org/html/rfc6396
@@ -474,7 +485,7 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
       c) NEXT_HOP (Type Code 3)
     */
     else if (attr_type_code == 3) {
-      if (! ipv4(raw, next_hop))
+      if (! ipv4(t_raw, next_hop))
         return false;
       VAST_DEBUG("mrt-parser bgp4mp-message-update", "next_hop", next_hop);
     }
@@ -485,7 +496,7 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
       d) MULTI_EXIT_DISC (Type Code 4)
     */
     else if (attr_type_code == 4) {
-      if (! count32(raw, multi_exit_disc))
+      if (! count32(t_raw, multi_exit_disc))
         return false;
       VAST_DEBUG("mrt-parser bgp4mp-message-update", "multi_exit_disc",
                  multi_exit_disc);
@@ -497,7 +508,7 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
       e) LOCAL_PREF (Type Code 5)
     */
     else if (attr_type_code == 5) {
-      if (! count32(raw, local_pref))
+      if (! count32(t_raw, local_pref))
         return false;
       VAST_DEBUG("mrt-parser bgp4mp-message-update", "local_pref", local_pref);
     }
@@ -519,15 +530,14 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
       g) AGGREGATOR (Type Code 7)
     */
     else if (attr_type_code == 7) {
-      std::vector<char> t_raw;
       if (info.as4) {
-        if (! count16(raw, aggregator_as))
+        if (! count32(t_raw, aggregator_as))
           return false;
-        t_raw = std::vector<char>((raw.begin() + 2), raw.end());
+        t_raw = std::vector<char>((t_raw.begin() + 4), t_raw.end());
       } else {
-        if (! count32(raw, aggregator_as))
+        if (! count16(t_raw, aggregator_as))
           return false;
-        t_raw = std::vector<char>((raw.begin() + 4), raw.end());
+        t_raw = std::vector<char>((t_raw.begin() + 2), t_raw.end());
       }
       if (! ipv4(t_raw, aggregator_ip))
         return false;
@@ -542,7 +552,6 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
     */
     else if (attr_type_code == 8) {
       count community = 0;
-      std::vector<char> t_raw = raw;
       for (auto i = 0u; i < (attr_length / 4u); i++) {
         if (! count32(t_raw, community))
           return false;
@@ -576,11 +585,11 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
       address mp_next_hop;
       count mp_nlri_length = 0;
       auto mp_reach_nlri_parser = count16 >> count8 >> count8;
-      if (! mp_reach_nlri_parser(raw, address_family_identifier,
+      if (! mp_reach_nlri_parser(t_raw, address_family_identifier,
                                  subsequent_address_family_identifier,
                                  next_hop_network_address_length))
         return false;
-      auto t_raw = std::vector<char>((raw.begin() + 4), raw.end());
+      t_raw = std::vector<char>((t_raw.begin() + 4), t_raw.end());
       mp_nlri_length = attr_length - (5 + next_hop_network_address_length);
       VAST_DEBUG("mrt-parser bgp4mp-message-update-mp-reach",
                  "address_family_identifier", address_family_identifier,
@@ -649,10 +658,10 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
       count subsequent_address_family_identifier = 0;
       count mp_nlri_length = 0;
       auto mp_unreach_nlri_parser = count16 >> count8;
-      if (! mp_unreach_nlri_parser(raw, address_family_identifier,
+      if (! mp_unreach_nlri_parser(t_raw, address_family_identifier,
                                    subsequent_address_family_identifier))
         return false;
-      auto t_raw = std::vector<char>((raw.begin() + 3), raw.end());
+      t_raw = std::vector<char>((t_raw.begin() + 3), t_raw.end());
       mp_nlri_length = attr_length - 3;
       VAST_DEBUG("mrt-parser bgp4mp-message-update-mp-unreach",
                  "address_family_identifier", address_family_identifier,
@@ -675,6 +684,55 @@ bool mrt_parser::parse_bgp4mp_message_update(std::vector<char>& raw,
         event_queue.push_back(e);
       }
       prefix.clear();
+    }
+    /*
+    RFC 4360 https://tools.ietf.org/html/rfc4360
+    2.  BGP Extended Communities Attribute (Type Code 16)
+      Each Extended Community is encoded as an 8-octet quantity, as
+      follows:
+       - Type Field  : 1 or 2 octets
+       - Value Field : Remaining octets
+        0                   1                   2                   3
+        0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |  Type high    |  Type low(*)  |                               |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+          Value                |
+       |                                                               |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       (*) Present for Extended types only, used for the Value field
+           otherwise.
+    */
+    else if (attr_type_code == 16) {
+      count type_field = 0;
+      count community = 0;
+      for (auto i = 0u; i < (attr_length / 8u); i++) {
+        auto extended_communites_parser = count16 >> count48;
+        if (! extended_communites_parser(t_raw, type_field, community))
+          return false;
+        t_raw = std::vector<char>((t_raw.begin() + 4), t_raw.end());
+        communities.push_back(community);
+      }
+      VAST_DEBUG("mrt-parser bgp4mp-message-update", "communities",
+                 to_string(communities));
+    }
+    /*
+    RFC 6793 https://tools.ietf.org/html/rfc6793
+    AS4_PATH (Type Code 17)
+    3.  Protocol Extensions
+      The AS path information exchanged between NEW BGP speakers is carried
+      in the existing AS_PATH attribute, except that each AS number in the
+      attribute is encoded as a four-octet entity (instead of a two-octet
+      entity). [...]
+    */
+    else if (attr_type_code == 17) {
+
+    }
+    /*
+    RFC 6793 https://tools.ietf.org/html/rfc6793
+    AS4_AGGREGATOR (Type Code 18)
+    */
+    else if (attr_type_code == 18) {
+
     }
     else {
       VAST_WARNING("mrt-parser bgp4mp-message-update",
@@ -1005,7 +1063,7 @@ bool mrt_parser::parse(std::istream& input, std::vector<event>& event_queue) {
     49   OSPFv3_ET
   */
   if (header.type == 13) {
-    return parse_mrt_message_table_dump_v2(raw, header);
+    return parse_mrt_message_table_dump_v2();
   } else if (header.type == 16) {
     return parse_mrt_message_bgp4mp(raw, header, event_queue);
   } else if (header.type == 17) {
