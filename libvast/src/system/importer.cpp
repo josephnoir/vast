@@ -81,6 +81,8 @@ void ship(stateful_actor<importer_state>* self, std::vector<event>&& batch) {
   auto msg = make_message(std::move(batch));
   self->send(actor_cast<actor>(self->state.archive), msg);
   self->send(self->state.index, msg);
+  for (auto& e : self->state.continuous_queries)
+    self->send(e, msg);
 }
 
 // Asks the metastore for more IDs.
@@ -152,8 +154,16 @@ behavior importer(stateful_actor<importer_state>* self, path dir,
   self->set_exit_handler(shutdown(self));
   self->set_down_handler(
     [=](down_msg const& msg) {
-      if (msg.source == self->state.meta_store)
+      if (msg.source == self->state.meta_store) {
         self->state.meta_store = meta_store_type{};
+      } else {
+        auto& cq = self->state.continuous_queries;
+        auto itr = find(begin(cq), end(cq), msg.source);
+        if (itr != cq.end()) {
+          VAST_DEBUG("Continous query ended.");
+          cq.erase(itr);
+        }
+      }
     }
   );
   return {
@@ -172,10 +182,17 @@ behavior importer(stateful_actor<importer_state>* self, path dir,
       VAST_DEBUG(self, "registers index", index);
       self->send(self->state.index, sys_atom::value, put_atom::value, index);
     },
+    // TODO: some atom ?
+    [=](const actor& exp) {
+      VAST_DEBUG("Received new continuous query.");
+      self->monitor(exp);
+      self->state.continuous_queries.push_back(exp);
+    },
     [=](std::vector<event>& events) {
       VAST_ASSERT(!events.empty());
       VAST_DEBUG(self, "got", events.size(), "events");
       VAST_DEBUG(self, "has", self->state.available, "IDs available");
+      
       if (!self->state.meta_store) {
         self->quit(make_error(ec::unspecified, "no meta store configured"));
         return;

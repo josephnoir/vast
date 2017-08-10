@@ -1,3 +1,5 @@
+#include <iterator>
+
 #include <caf/all.hpp>
 
 #include "vast/config.hpp"
@@ -41,7 +43,8 @@ expected<actor> spawn_archive(local_actor* self, options& opts) {
   return actor_cast<actor>(a);
 }
 
-expected<actor> spawn_exporter(local_actor* self, options& opts) {
+expected<actor> spawn_exporter(stateful_actor<node_state>* self,
+                               options& opts) {
   auto limit = uint64_t{0};
   auto r = opts.params.extract_opts({
     {"continuous,c", "marks a query as continuous"},
@@ -79,10 +82,28 @@ expected<actor> spawn_exporter(local_actor* self, options& opts) {
     anon_send(exp, extract_atom::value, limit);
   else
     anon_send(exp, extract_atom::value);
+  if (has_continuous_option(query_opts)) {
+    self->request(self->state.tracker, infinite, get_atom::value).then(
+      [=](registry& reg) mutable {
+        VAST_DEBUG("Looking for importers");
+        // TODO: should probably not restricted to the local node?
+        auto& local = reg[self->state.name];
+        const std::string wanted = "importer";
+        for (auto& comp : local) {
+          if (std::equal(std::begin(wanted), std::end(wanted),
+                         std::begin(comp.first))) {
+            VAST_DEBUG("> found match!");
+            self->send(comp.second.actor, exp);
+          }
+        }
+      }
+    );
+  }
   return exp;
 }
 
-expected<actor> spawn_importer(local_actor* self, options& opts) {
+expected<actor> spawn_importer(stateful_actor<node_state>* self,
+                               options& opts) {
   auto ids = size_t{128};
   auto r = opts.params.extract_opts({
     {"ids,n", "number of initial IDs to request", ids},

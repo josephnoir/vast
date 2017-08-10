@@ -5,18 +5,10 @@
 
 #include "vast/filesystem.hpp"
 
-#include "vast/system/tracker.hpp"
+#include "vast/system/node_state.hpp"
 
 namespace vast {
 namespace system {
-
-/// A container for VAST components.
-struct node_state {
-  path dir;
-  tracker_type tracker;
-  std::unordered_map<std::string, int> labels;
-  std::string name = "node";
-};
 
 /// Spawns a node.
 /// @param self The actor handle

@@ -47,6 +47,7 @@ void ship_results(stateful_actor<exporter_state>* self) {
 }
 
 void shutdown(stateful_actor<exporter_state>* self) {
+  // TODO: enable clean shutdown on CTRL + C ...?
   if (rank(self->state.unprocessed) > 0 || !self->state.results.empty())
     return;
   timespan runtime = steady_clock::now() - self->state.start;
@@ -66,10 +67,13 @@ void shutdown(stateful_actor<exporter_state>* self) {
     self->send(self->state.accountant, "exporter.selectivity", selectivity);
     self->send(self->state.accountant, "exporter.runtime", runtime);
   }
-  self->send_exit(self, exit_reason::normal);
+  if (!has_continuous_option(self->state.opts))
+    self->send_exit(self, exit_reason::normal);
 }
 
 void request_more_hits(stateful_actor<exporter_state>* self) {
+  if (!has_historical_option(self->state.opts))
+    return;
   auto waiting_for_hits =
     self->state.stats.received == self->state.stats.scheduled;
   auto need_more_results = self->state.stats.requested > 0;
@@ -89,11 +93,14 @@ void request_more_hits(stateful_actor<exporter_state>* self) {
 } // namespace <anonymous>
 
 behavior exporter(stateful_actor<exporter_state>* self, expression expr,
-                  query_options) {
+                  query_options opts) {
   auto eu = self->system().dummy_execution_unit();
   self->state.sink = actor_pool::make(eu, actor_pool::broadcast());
   if (auto a = self->system().registry().get(accountant_atom::value))
     self->state.accountant = actor_cast<accountant_type>(a);
+  self->state.opts = opts;
+  if (has_continuous_option(opts))
+    VAST_DEBUG(self, "has continuous query option");
   self->set_exit_handler(
     [=](const exit_msg& msg) {
       self->send(self->state.sink, sys_atom::value, delete_atom::value);
@@ -140,6 +147,7 @@ behavior exporter(stateful_actor<exporter_state>* self, expression expr,
     [=](std::vector<event>& candidates) {
       VAST_DEBUG(self, "got batch of", candidates.size(), "events");
       bitmap mask;
+      auto sender = self->current_sender();
       for (auto& candidate : candidates) {
         auto& checker = self->state.checkers[candidate.type()];
         // Construct a candidate checker if we don't have one for this type.
@@ -154,11 +162,15 @@ behavior exporter(stateful_actor<exporter_state>* self, expression expr,
           self->state.results.push_back(std::move(candidate));
         else
           VAST_DEBUG(self, "ignores false positive:", candidate);
-        mask.append_bits(false, candidate.id() - mask.size());
-        mask.append_bit(true);
+        if (sender == self->state.index || sender == self->state.archive) {
+          mask.append_bits(false, candidate.id() - mask.size());
+          mask.append_bit(true);
+        }
       }
-      self->state.stats.processed += candidates.size();
-      self->state.unprocessed -= mask;
+      if (sender == self->state.index || sender == self->state.archive) {
+        self->state.stats.processed += candidates.size();
+        self->state.unprocessed -= mask;
+      }
       ship_results(self);
       request_more_hits(self);
       if (self->state.stats.received == self->state.stats.expected)
@@ -200,6 +212,8 @@ behavior exporter(stateful_actor<exporter_state>* self, expression expr,
     [=](run_atom) {
       VAST_INFO(self, "executes query", expr);
       self->state.start = steady_clock::now();
+      if (!has_historical_option(self->state.opts))
+        return;
       self->request(self->state.index, infinite, expr).then(
         [=](const uuid& lookup, size_t partitions, size_t scheduled) {
           VAST_DEBUG(self, "got lookup handle", lookup << ", scheduled",
