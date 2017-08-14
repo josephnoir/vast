@@ -3,10 +3,10 @@
 
 #include <istream>
 #include <iostream>
+
 #include "vast/logger.hpp"
 #include "vast/schema.hpp"
 #include "vast/time.hpp"
-#include "vast/date.hpp"
 #include "vast/address.hpp"
 #include "vast/subnet.hpp"
 #include "vast/data.hpp"
